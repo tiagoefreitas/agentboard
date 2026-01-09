@@ -6,7 +6,7 @@ import { ensureTmux } from './prerequisites'
 import { SessionManager } from './SessionManager'
 import { SessionRegistry } from './SessionRegistry'
 import { StatusWatcher } from './StatusWatcher'
-import { TerminalProxy, restoreAllWindowSizes } from './TerminalProxy'
+import { TerminalProxy } from './TerminalProxy'
 import type { ClientMessage, ServerMessage } from '../shared/types'
 
 ensureTmux()
@@ -71,10 +71,6 @@ Bun.serve<WSData>({
     close(ws) {
       cleanupTerminals(ws)
       sockets.delete(ws)
-      // Restore any remaining window sizes as a safety net
-      if (sockets.size === 0) {
-        restoreAllWindowSizes()
-      }
     },
   },
 })
@@ -90,13 +86,11 @@ function cleanupAllTerminals() {
 
 process.on('SIGINT', () => {
   cleanupAllTerminals()
-  restoreAllWindowSizes()
   process.exit(0)
 })
 
 process.on('SIGTERM', () => {
   cleanupAllTerminals()
-  restoreAllWindowSizes()
   process.exit(0)
 })
 
@@ -206,9 +200,10 @@ function attachTerminal(ws: ServerWebSocket<WSData>, sessionId: string) {
     return
   }
 
-  const existing = ws.data.terminals.get(sessionId)
-  if (existing) {
-    existing.dispose()
+  // Detach ALL existing terminals first - only one terminal at a time
+  for (const [existingId, terminal] of ws.data.terminals) {
+    terminal.dispose()
+    ws.data.terminals.delete(existingId)
   }
 
   const terminal = new TerminalProxy(session.tmuxWindow, {

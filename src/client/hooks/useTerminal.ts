@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { WebglAddon } from 'xterm-addon-webgl'
@@ -11,6 +11,7 @@ interface UseTerminalOptions {
   sendMessage: (message: any) => void
   subscribe: (listener: (message: ServerMessage) => void) => () => void
   theme: ITheme
+  onScrollChange?: (isAtBottom: boolean) => void
 }
 
 export function useTerminal({
@@ -18,25 +19,37 @@ export function useTerminal({
   sendMessage,
   subscribe,
   theme,
+  onScrollChange,
 }: UseTerminalOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const webglAddonRef = useRef<WebglAddon | null>(null)
   const resizeTimer = useRef<number | null>(null)
+  const scrollTimer = useRef<number | null>(null)
 
-  // Use refs for values that callbacks need to access
-  const sessionIdRef = useRef<string | null>(sessionId)
+  // Track the currently attached session to prevent race conditions
+  const attachedSessionRef = useRef<string | null>(null)
   const sendMessageRef = useRef(sendMessage)
-
-  // Keep refs in sync
-  useEffect(() => {
-    sessionIdRef.current = sessionId
-  }, [sessionId])
+  const onScrollChangeRef = useRef(onScrollChange)
 
   useEffect(() => {
     sendMessageRef.current = sendMessage
   }, [sendMessage])
+
+  useEffect(() => {
+    onScrollChangeRef.current = onScrollChange
+  }, [onScrollChange])
+
+  // Check if terminal is scrolled to bottom
+  const checkScrollPosition = useCallback(() => {
+    const terminal = terminalRef.current
+    if (!terminal || !onScrollChangeRef.current) return
+
+    const buffer = terminal.buffer.active
+    const isAtBottom = buffer.viewportY >= buffer.baseY
+    onScrollChangeRef.current(isAtBottom)
+  }, [])
 
   // Terminal initialization - only once on mount
   useEffect(() => {
@@ -54,7 +67,8 @@ export function useTerminal({
       fontSize: 13,
       lineHeight: 1.4,
       scrollback: 5000,
-      cursorBlink: true,
+      cursorBlink: false,
+      cursorStyle: 'underline',
       convertEol: true,
       theme,
     })
@@ -87,12 +101,17 @@ export function useTerminal({
       return true
     })
 
-    // Handle input
+    // Handle input - only send to attached session
     terminal.onData((data) => {
-      const activeSession = sessionIdRef.current
-      if (activeSession) {
-        sendMessageRef.current({ type: 'terminal-input', sessionId: activeSession, data })
+      const attached = attachedSessionRef.current
+      if (attached) {
+        sendMessageRef.current({ type: 'terminal-input', sessionId: attached, data })
       }
+    })
+
+    // Track scroll position changes
+    terminal.onScroll(() => {
+      checkScrollPosition()
     })
 
     terminalRef.current = terminal
@@ -119,7 +138,7 @@ export function useTerminal({
       fitAddonRef.current = null
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // Only run once on mount
+  }, [])
 
   // Update theme
   useEffect(() => {
@@ -129,46 +148,65 @@ export function useTerminal({
   }, [theme])
 
   // Handle session changes - attach/detach
-  const prevSessionIdRef = useRef<string | null>(null)
-
   useEffect(() => {
     const terminal = terminalRef.current
     if (!terminal) return
 
-    const prevSessionId = prevSessionIdRef.current
+    const prevAttached = attachedSessionRef.current
 
-    // Detach from previous session
-    if (prevSessionId && prevSessionId !== sessionId) {
-      sendMessage({ type: 'terminal-detach', sessionId: prevSessionId })
+    // Detach from previous session first
+    if (prevAttached && prevAttached !== sessionId) {
+      sendMessage({ type: 'terminal-detach', sessionId: prevAttached })
+      attachedSessionRef.current = null
     }
 
     // Attach to new session
-    if (sessionId && sessionId !== prevSessionId) {
-      // Clear and reset for new session
-      terminal.clear()
-      terminal.write('\x1b[2J\x1b[H') // Clear screen and move cursor to home
+    if (sessionId && sessionId !== prevAttached) {
+      // Reset terminal before attaching
+      terminal.reset()
+      // Send attach message
       sendMessage({ type: 'terminal-attach', sessionId })
+      // Mark as attached
+      attachedSessionRef.current = sessionId
+
+      // Scroll to bottom after content loads
+      if (scrollTimer.current) {
+        window.clearTimeout(scrollTimer.current)
+      }
+      scrollTimer.current = window.setTimeout(() => {
+        terminal.scrollToBottom()
+        checkScrollPosition()
+      }, 300)
     }
 
-    prevSessionIdRef.current = sessionId
-  }, [sessionId, sendMessage])
+    // Handle deselection
+    if (!sessionId && prevAttached) {
+      attachedSessionRef.current = null
+    }
+  }, [sessionId, sendMessage, checkScrollPosition])
 
-  // Subscribe to terminal output - stable subscription that checks sessionId via ref
+  // Subscribe to terminal output
   useEffect(() => {
     const unsubscribe = subscribe((message) => {
+      const terminal = terminalRef.current
+      const attachedSession = attachedSessionRef.current
+
       if (
         message.type === 'terminal-output' &&
-        message.sessionId === sessionIdRef.current &&
-        terminalRef.current
+        terminal &&
+        attachedSession &&
+        message.sessionId === attachedSession
       ) {
-        terminalRef.current.write(message.data)
+        terminal.write(message.data)
+        // Update scroll position after write
+        checkScrollPosition()
       }
     })
 
     return unsubscribe
-  }, [subscribe])
+  }, [subscribe, checkScrollPosition])
 
-  // Handle resize
+  // Handle resize - with longer debounce to prevent flickering
   useEffect(() => {
     const container = containerRef.current
     const terminal = terminalRef.current
@@ -181,22 +219,25 @@ export function useTerminal({
         window.clearTimeout(resizeTimer.current)
       }
 
+      // Longer debounce to prevent rapid resize events
       resizeTimer.current = window.setTimeout(() => {
         fitAddon.fit()
-        const currentSessionId = sessionIdRef.current
-        if (currentSessionId) {
+        const attached = attachedSessionRef.current
+        if (attached) {
           sendMessageRef.current({
             type: 'terminal-resize',
-            sessionId: currentSessionId,
+            sessionId: attached,
             cols: terminal.cols,
             rows: terminal.rows,
           })
         }
-      }, 100)
+      }, 150)
     }
 
     const observer = new ResizeObserver(handleResize)
     observer.observe(container)
+
+    // Initial fit
     handleResize()
 
     return () => {
@@ -207,5 +248,5 @@ export function useTerminal({
     }
   }, [])
 
-  return { containerRef }
+  return { containerRef, terminalRef }
 }

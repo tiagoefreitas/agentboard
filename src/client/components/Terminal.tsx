@@ -1,3 +1,4 @@
+import { useState, useCallback } from 'react'
 import type { Session } from '@shared/types'
 import type { ConnectionStatus } from '../stores/sessionStore'
 import { useTerminal } from '../hooks/useTerminal'
@@ -38,13 +39,21 @@ export default function Terminal({
 }: TerminalProps) {
   const theme = useThemeStore((state) => state.theme)
   const terminalTheme = terminalThemes[theme]
+  const [showScrollButton, setShowScrollButton] = useState(false)
 
-  const { containerRef } = useTerminal({
+  const { containerRef, terminalRef } = useTerminal({
     sessionId: session?.id ?? null,
     sendMessage,
     subscribe,
     theme: terminalTheme,
+    onScrollChange: (isAtBottom) => {
+      setShowScrollButton(!isAtBottom)
+    },
   })
+
+  const scrollToBottom = useCallback(() => {
+    terminalRef.current?.scrollToBottom()
+  }, [terminalRef])
 
   const hasSession = Boolean(session)
 
@@ -93,6 +102,30 @@ export default function Terminal({
           <div className="absolute inset-0 flex items-center justify-center text-sm text-muted">
             Select a session to view terminal
           </div>
+        )}
+
+        {/* Scroll to bottom button */}
+        {showScrollButton && session && (
+          <button
+            onClick={scrollToBottom}
+            className="absolute bottom-4 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-surface border border-border shadow-lg hover:bg-hover transition-colors"
+            title="Scroll to bottom"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="text-secondary"
+            >
+              <path d="M12 5v14M5 12l7 7 7-7" />
+            </svg>
+          </button>
         )}
       </div>
     </section>

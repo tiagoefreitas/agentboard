@@ -102,7 +102,7 @@ export default function App() {
   }, [theme])
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-full flex-col overflow-hidden">
       <Header
         connectionStatus={connectionStatus}
         needsApprovalCount={needsApprovalCount}
