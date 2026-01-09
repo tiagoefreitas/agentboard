@@ -51,6 +51,8 @@ export default function SessionCard({
       } ${session.status === 'needs_approval' ? 'animate-pulse-soft' : ''}`}
       role="button"
       tabIndex={0}
+      data-testid="session-card"
+      data-session-id={session.id}
       onClick={onSelect}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {

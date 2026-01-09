@@ -125,7 +125,7 @@ export class SessionManager {
       .map((window) => ({
         id: `${sessionName}:${window.id}`,
         name: window.name,
-        tmuxWindow: `${sessionName}:${window.name}`,
+        tmuxWindow: `${sessionName}:${window.id}`,
         projectPath: window.path,
         status: 'unknown',
         lastActivity: new Date(

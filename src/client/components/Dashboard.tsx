@@ -77,6 +77,7 @@ export default function Dashboard({
             key={column.key}
             className={`glass-card flex min-h-[220px] flex-col gap-3 rounded-3xl border p-4 ${column.accent} animate-rise`}
             style={{ animationDelay: `${index * 60}ms` }}
+            data-testid={`column-${column.key}`}
           >
             <div>
               <h2 className="text-lg font-semibold text-ink">

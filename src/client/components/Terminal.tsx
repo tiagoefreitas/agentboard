@@ -37,7 +37,10 @@ export default function Terminal({
     : 'hidden md:flex md:h-[320px] md:flex-col md:rounded-3xl'
 
   return (
-    <section className={`terminal-shell ${overlayClasses}`}>
+    <section
+      className={`terminal-shell ${overlayClasses}`}
+      data-testid="terminal-panel"
+    >
       <div className="flex items-center justify-between border-b border-white/10 bg-[#1a1714] px-4 py-3 text-white">
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-white/60">

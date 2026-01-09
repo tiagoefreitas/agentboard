@@ -6,7 +6,7 @@ import { ensureTmux } from './prerequisites'
 import { SessionManager } from './SessionManager'
 import { SessionRegistry } from './SessionRegistry'
 import { StatusWatcher } from './StatusWatcher'
-import { TerminalProxy } from './TerminalProxy'
+import { TerminalProxy, restoreAllWindowSizes } from './TerminalProxy'
 import type { ClientMessage, ServerMessage } from '../shared/types'
 
 ensureTmux()
@@ -71,11 +71,34 @@ Bun.serve<WSData>({
     close(ws) {
       cleanupTerminals(ws)
       sockets.delete(ws)
+      // Restore any remaining window sizes as a safety net
+      if (sockets.size === 0) {
+        restoreAllWindowSizes()
+      }
     },
   },
 })
 
 console.log(`Agentboard server running on http://localhost:${config.port}`)
+
+// Cleanup all terminals on server shutdown
+function cleanupAllTerminals() {
+  for (const ws of sockets) {
+    cleanupTerminals(ws)
+  }
+}
+
+process.on('SIGINT', () => {
+  cleanupAllTerminals()
+  restoreAllWindowSizes()
+  process.exit(0)
+})
+
+process.on('SIGTERM', () => {
+  cleanupAllTerminals()
+  restoreAllWindowSizes()
+  process.exit(0)
+})
 
 function cleanupTerminals(ws: ServerWebSocket<WSData>) {
   for (const terminal of ws.data.terminals.values()) {

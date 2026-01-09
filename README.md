@@ -70,3 +70,16 @@ You can also pass a custom window name:
 bun test
 bun run lint
 ```
+
+For browser-level E2E tests:
+
+```bash
+bunx playwright install
+bun run test:e2e
+```
+
+Optional overrides:
+
+```bash
+E2E_PORT=4173 E2E_TMUX_SESSION=agentboard-e2e bun run test:e2e
+```

@@ -9,3 +9,5 @@ coverage
 *.tmp
 .vscode
 .idea
+playwright-report
+test-results

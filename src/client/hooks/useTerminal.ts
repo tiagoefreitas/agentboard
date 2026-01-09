@@ -112,7 +112,9 @@ export function useTerminal({
     }
 
     if (sessionId) {
+      // Clear terminal completely before attaching to new session
       terminalRef.current.reset()
+      terminalRef.current.clear()
       terminalRef.current.writeln(`\u001b[33mAttached to ${sessionId}\u001b[0m`)
       sendMessage({ type: 'terminal-attach', sessionId })
     }
@@ -120,6 +122,10 @@ export function useTerminal({
     return () => {
       if (sessionId) {
         sendMessage({ type: 'terminal-detach', sessionId })
+      }
+      // Clear on detach too to prevent stale content showing
+      if (terminalRef.current) {
+        terminalRef.current.clear()
       }
     }
   }, [sendMessage, sessionId])
