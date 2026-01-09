@@ -19,6 +19,7 @@ export function useTerminal({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const webglAddonRef = useRef<WebglAddon | null>(null)
   const resizeTimer = useRef<number | null>(null)
   const sessionIdRef = useRef<string | null>(sessionId)
 
@@ -51,7 +52,9 @@ export function useTerminal({
     terminal.loadAddon(new ClipboardAddon())
 
     try {
-      terminal.loadAddon(new WebglAddon())
+      const webglAddon = new WebglAddon()
+      terminal.loadAddon(webglAddon)
+      webglAddonRef.current = webglAddon
     } catch {
       // WebGL addon is optional.
     }
@@ -84,7 +87,20 @@ export function useTerminal({
 
     return () => {
       dispose.dispose()
-      terminal.dispose()
+      // Dispose WebGL addon first to avoid cleanup race conditions
+      if (webglAddonRef.current) {
+        try {
+          webglAddonRef.current.dispose()
+        } catch {
+          // Ignore errors during WebGL addon disposal
+        }
+        webglAddonRef.current = null
+      }
+      try {
+        terminal.dispose()
+      } catch {
+        // Ignore errors during terminal disposal (can happen in React StrictMode)
+      }
       terminalRef.current = null
       fitAddonRef.current = null
     }

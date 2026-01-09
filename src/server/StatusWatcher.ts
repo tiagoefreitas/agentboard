@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import type { Session } from '../shared/types'
 import { config } from './config'
-import { discoverLogFile } from './logDiscovery'
+import { discoverLogFiles, type LogFileInfo } from './logDiscovery'
 import { parseLogLine } from './logParser'
 import { transitionStatus } from './statusMachine'
 import type { SessionRegistry } from './SessionRegistry'
@@ -57,21 +57,48 @@ export class StatusWatcher {
       }
     }
 
+    const sessionsByPath = new Map<string, Session[]>()
     for (const session of sessions) {
-      await this.ensureWatching(session)
+      const group = sessionsByPath.get(session.projectPath)
+      if (group) {
+        group.push(session)
+      } else {
+        sessionsByPath.set(session.projectPath, [session])
+      }
+    }
+
+    const assignments = new Map<string, string | null>()
+
+    await Promise.all(
+      Array.from(sessionsByPath.entries()).map(async ([projectPath, group]) => {
+        const logFiles = await discoverLogFiles(projectPath)
+        const groupAssignments = this.assignLogFiles(group, logFiles)
+        for (const [sessionId, logFile] of groupAssignments.entries()) {
+          assignments.set(sessionId, logFile)
+        }
+      })
+    )
+
+    for (const session of sessions) {
+      await this.ensureWatching(session, assignments.get(session.id) ?? null)
     }
   }
 
-  private async ensureWatching(session: Session): Promise<void> {
+  private async ensureWatching(
+    session: Session,
+    logFile: string | null
+  ): Promise<void> {
     const current = this.states.get(session.id)
-    const logFile = await discoverLogFile(session.projectPath)
 
     if (!logFile) {
       if (current?.logFile) {
         this.stopWatching(session.id)
       }
-      if (session.status !== 'unknown') {
-        this.registry.updateSession(session.id, { status: 'unknown' })
+      if (session.status !== 'unknown' || session.logFile) {
+        this.registry.updateSession(session.id, {
+          status: 'unknown',
+          logFile: undefined,
+        })
       }
       return
     }
@@ -85,6 +112,55 @@ export class StatusWatcher {
     }
 
     await this.startWatching(session, logFile)
+  }
+
+  private assignLogFiles(
+    sessions: Session[],
+    logFiles: LogFileInfo[]
+  ): Map<string, string | null> {
+    const assignments = new Map<string, string | null>()
+
+    if (logFiles.length === 0) {
+      for (const session of sessions) {
+        assignments.set(session.id, null)
+      }
+      return assignments
+    }
+
+    const available = new Map<string, number>(
+      logFiles.map((file) => [file.path, file.mtimeMs])
+    )
+
+    for (const session of sessions) {
+      const currentLog = this.states.get(session.id)?.logFile
+      if (currentLog && available.has(currentLog)) {
+        assignments.set(session.id, currentLog)
+        available.delete(currentLog)
+      }
+    }
+
+    const remainingSessions = sessions.filter(
+      (session) => !assignments.has(session.id)
+    )
+    const remainingLogs = Array.from(available.entries()).map(
+      ([path, mtimeMs]) => ({ path, mtimeMs })
+    )
+
+    const toTimestamp = (value: string) => {
+      const parsed = Date.parse(value)
+      return Number.isNaN(parsed) ? 0 : parsed
+    }
+
+    remainingSessions.sort(
+      (a, b) => toTimestamp(b.lastActivity) - toTimestamp(a.lastActivity)
+    )
+    remainingLogs.sort((a, b) => b.mtimeMs - a.mtimeMs)
+
+    for (let i = 0; i < remainingSessions.length; i += 1) {
+      assignments.set(remainingSessions[i].id, remainingLogs[i]?.path ?? null)
+    }
+
+    return assignments
   }
 
   private async startWatching(session: Session, logFile: string): Promise<void> {

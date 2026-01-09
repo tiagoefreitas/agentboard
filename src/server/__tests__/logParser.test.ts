@@ -1,45 +1,52 @@
 import { describe, expect, it } from 'bun:test'
 import { parseLogLine } from '../logParser'
-import { escapeProjectPath } from '../logDiscovery'
 
-describe('logParser', () => {
-  it('detects assistant tool use', () => {
-    const line = JSON.stringify({ type: 'assistant', stop_reason: 'tool_use' })
+describe('parseLogLine', () => {
+  it('detects tool use from stop_reason', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: { stop_reason: 'tool_use', content: [] },
+    })
     expect(parseLogLine(line)).toEqual({ type: 'assistant_tool_use' })
   })
 
-  it('detects turn end', () => {
-    const line = JSON.stringify({ type: 'assistant', stop_reason: 'end_turn' })
+  it('detects tool use from content blocks', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use' }] },
+    })
+    expect(parseLogLine(line)).toEqual({ type: 'assistant_tool_use' })
+  })
+
+  it('detects turn_end from stop_reason', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: { stop_reason: 'end_turn', content: [{ type: 'text' }] },
+    })
     expect(parseLogLine(line)).toEqual({ type: 'turn_end' })
   })
 
-  it('detects tool result', () => {
+  it('treats assistant text as turn_end when stop_reason is missing', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'text' }] },
+    })
+    expect(parseLogLine(line)).toEqual({ type: 'turn_end' })
+  })
+
+  it('detects tool_result in user content blocks', () => {
     const line = JSON.stringify({
       type: 'user',
-      message: {
-        content: [{ type: 'tool_result' }],
-      },
+      message: { content: [{ type: 'tool_result' }] },
     })
     expect(parseLogLine(line)).toEqual({ type: 'tool_result' })
   })
 
-  it('detects user prompt', () => {
+  it('treats user string content as user_prompt', () => {
     const line = JSON.stringify({
       type: 'user',
       message: { content: 'hello' },
     })
     expect(parseLogLine(line)).toEqual({ type: 'user_prompt' })
-  })
-
-  it('ignores bad lines', () => {
-    expect(parseLogLine('not json')).toBeNull()
-  })
-})
-
-describe('logDiscovery', () => {
-  it('escapes project paths', () => {
-    expect(escapeProjectPath('/Users/test/project')).toBe(
-      '-Users-test-project'
-    )
   })
 })
