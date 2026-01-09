@@ -29,6 +29,7 @@ bun run start
 
 - Agentboard uses a single tmux session (default: `agentboard`) with one window per project.
 - Claude Code logs are read from `~/.claude/projects/<escaped-path>/*.jsonl`.
+- Codex logs are read from `~/.codex/sessions/YYYY/MM/DD/*.jsonl` and matched by session `cwd`.
 - Status changes are derived from JSONL events (tool use, turn end, user prompts).
 
 ## Environment Variables
@@ -40,6 +41,7 @@ REFRESH_INTERVAL_MS=5000
 IDLE_TIMEOUT_MS=300000
 DISCOVER_PREFIXES=external,work
 CLAUDE_PROJECTS_DIR="$HOME/.claude/projects"
+CODEX_SESSIONS_DIR="$HOME/.codex/sessions"
 ```
 
 - `DISCOVER_PREFIXES` allows viewing windows from other tmux sessions. These are marked **View Only**.
@@ -68,6 +70,7 @@ You can also pass a custom window name:
 
 ```bash
 bun test
+bun run test:coverage
 bun run lint
 ```
 

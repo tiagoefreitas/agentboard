@@ -1,4 +1,5 @@
 import type { ConnectionStatus } from '../stores/sessionStore'
+import { useThemeStore } from '../stores/themeStore'
 
 interface HeaderProps {
   connectionStatus: ConnectionStatus
@@ -7,20 +8,12 @@ interface HeaderProps {
   onRefresh: () => void
 }
 
-const statusStyles: Record<ConnectionStatus, string> = {
-  connected: 'bg-emerald-500',
-  connecting: 'bg-amber-400',
-  reconnecting: 'bg-amber-500 animate-pulse-soft',
-  disconnected: 'bg-rose-500',
-  error: 'bg-rose-500',
-}
-
-const statusLabels: Record<ConnectionStatus, string> = {
-  connected: 'Connected',
-  connecting: 'Connecting',
-  reconnecting: 'Reconnecting',
-  disconnected: 'Disconnected',
-  error: 'Error',
+const statusDot: Record<ConnectionStatus, string> = {
+  connected: 'bg-working',
+  connecting: 'bg-approval',
+  reconnecting: 'bg-approval',
+  disconnected: 'bg-danger',
+  error: 'bg-danger',
 }
 
 export default function Header({
@@ -29,43 +22,40 @@ export default function Header({
   onNewSession,
   onRefresh,
 }: HeaderProps) {
+  const theme = useThemeStore((state) => state.theme)
+  const toggleTheme = useThemeStore((state) => state.toggleTheme)
+
   return (
-    <header className="flex flex-wrap items-center justify-between gap-4 px-6 py-6">
-      <div>
-        <div className="flex items-center gap-3">
-          <div className="h-3 w-3 rounded-full border border-white/70 bg-accent shadow-glow" />
-          <h1 className="text-2xl font-semibold tracking-tight text-ink">
-            Agentboard
-          </h1>
-          {needsApprovalCount > 0 && (
-            <span className="status-pill bg-approval/20 text-ink">
-              {needsApprovalCount} Needs Approval
-            </span>
-          )}
+    <header className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-elevated px-4">
+      <div className="flex items-center gap-4">
+        <h1 className="text-sm font-semibold tracking-tight text-primary">
+          AGENTBOARD
+        </h1>
+        <div className="flex items-center gap-1.5 text-xs text-muted">
+          <span className={`h-2 w-2 rounded-full ${statusDot[connectionStatus]}`} />
+          <span className="hidden sm:inline">{connectionStatus}</span>
         </div>
-        <p className="mt-2 text-sm text-muted">
-          Live Claude sessions, tmux-backed terminals, and real-time status cues.
-        </p>
+        {needsApprovalCount > 0 && (
+          <span className="flex items-center gap-1.5 rounded bg-approval/20 px-2 py-0.5 text-xs font-medium text-approval">
+            <span className="h-1.5 w-1.5 rounded-full bg-approval" />
+            {needsApprovalCount} approval{needsApprovalCount > 1 ? 's' : ''}
+          </span>
+        )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2 rounded-full bg-white/70 px-3 py-1 text-xs font-semibold text-muted shadow-glow">
-          <span
-            className={`h-2.5 w-2.5 rounded-full ${statusStyles[connectionStatus]}`}
-          />
-          {statusLabels[connectionStatus]}
-        </div>
+      <div className="flex items-center gap-2">
         <button
-          onClick={onRefresh}
-          className="rounded-full border border-white/70 bg-white/80 px-4 py-2 text-sm font-semibold text-ink shadow-glow transition hover:-translate-y-0.5"
+          onClick={toggleTheme}
+          className="btn"
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
         >
+          {theme === 'dark' ? 'Light' : 'Dark'}
+        </button>
+        <button onClick={onRefresh} className="btn">
           Refresh
         </button>
-        <button
-          onClick={onNewSession}
-          className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white shadow-glow transition hover:-translate-y-0.5"
-        >
-          + New Session
+        <button onClick={onNewSession} className="btn btn-primary">
+          + New
         </button>
       </div>
     </header>

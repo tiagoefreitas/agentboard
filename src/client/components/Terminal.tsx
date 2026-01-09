@@ -1,6 +1,7 @@
 import type { Session } from '@shared/types'
 import type { ConnectionStatus } from '../stores/sessionStore'
 import { useTerminal } from '../hooks/useTerminal'
+import { useThemeStore, terminalThemes } from '../stores/themeStore'
 
 interface TerminalProps {
   session: Session | null
@@ -8,14 +9,23 @@ interface TerminalProps {
   sendMessage: (message: any) => void
   subscribe: (listener: any) => () => void
   onClose: () => void
+  pendingApprovals: number
 }
 
 const statusText: Record<Session['status'], string> = {
   working: 'Working',
-  needs_approval: 'Needs Approval',
+  needs_approval: 'Approval',
   waiting: 'Waiting',
   idle: 'Idle',
   unknown: 'Unknown',
+}
+
+const statusClass: Record<Session['status'], string> = {
+  working: 'text-working',
+  needs_approval: 'text-approval',
+  waiting: 'text-waiting',
+  idle: 'text-muted',
+  unknown: 'text-muted',
 }
 
 export default function Terminal({
@@ -24,58 +34,64 @@ export default function Terminal({
   sendMessage,
   subscribe,
   onClose,
+  pendingApprovals,
 }: TerminalProps) {
+  const theme = useThemeStore((state) => state.theme)
+  const terminalTheme = terminalThemes[theme]
+
   const { containerRef } = useTerminal({
     sessionId: session?.id ?? null,
     sendMessage,
     subscribe,
+    theme: terminalTheme,
   })
 
-  const isActive = Boolean(session)
-  const overlayClasses = isActive
-    ? 'fixed inset-0 z-40 flex flex-col bg-[#151210] md:static md:inset-auto md:h-[320px] md:rounded-3xl'
-    : 'hidden md:flex md:h-[320px] md:flex-col md:rounded-3xl'
+  const hasSession = Boolean(session)
 
   return (
     <section
-      className={`terminal-shell ${overlayClasses}`}
+      className={`flex flex-1 flex-col bg-base ${hasSession ? 'terminal-mobile-overlay md:relative md:inset-auto' : 'hidden md:flex'}`}
       data-testid="terminal-panel"
     >
-      <div className="flex items-center justify-between border-b border-white/10 bg-[#1a1714] px-4 py-3 text-white">
-        <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-white/60">
-            Terminal
-          </p>
-          <h3 className="text-base font-semibold">
-            {session ? session.name : 'Select a session'}
-          </h3>
-        </div>
-        <div className="flex items-center gap-3">
-          {session && (
-            <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white/80">
+      {/* Terminal header - only show when session selected */}
+      {session && (
+        <div className="flex h-10 shrink-0 items-center justify-between border-b border-border bg-elevated px-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onClose}
+              className="btn py-1 text-[11px] md:hidden"
+            >
+              Back
+            </button>
+            <span className="text-sm font-medium text-primary">
+              {session.name}
+            </span>
+            <span className={`text-xs ${statusClass[session.status]}`}>
               {statusText[session.status]}
             </span>
-          )}
-          <button
-            onClick={onClose}
-            className="rounded-full border border-white/20 px-3 py-1 text-xs font-semibold text-white/80 md:hidden"
-          >
-            Back
-          </button>
-        </div>
-      </div>
+          </div>
 
-      {connectionStatus !== 'connected' && (
-        <div className="border-b border-white/10 bg-amber-500/20 px-4 py-2 text-xs text-amber-100">
-          Connection {connectionStatus}. Terminal updates may be delayed.
+          <div className="flex items-center gap-2">
+            {pendingApprovals > 0 && (
+              <span className="flex items-center gap-1.5 rounded bg-approval/20 px-2 py-0.5 text-xs font-medium text-approval md:hidden">
+                {pendingApprovals} pending
+              </span>
+            )}
+            {connectionStatus !== 'connected' && (
+              <span className="text-xs text-approval">
+                {connectionStatus}
+              </span>
+            )}
+          </div>
         </div>
       )}
 
-      <div className="relative flex-1 bg-[#151210]">
-        <div ref={containerRef} className="h-full w-full" />
+      {/* Terminal content - always rendered so ref is attached */}
+      <div className="relative flex-1">
+        <div ref={containerRef} className="absolute inset-0" />
         {!session && (
-          <div className="absolute inset-0 flex items-center justify-center text-sm text-white/60">
-            Choose a session to open its tmux window.
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-muted">
+            Select a session to view terminal
           </div>
         )}
       </div>

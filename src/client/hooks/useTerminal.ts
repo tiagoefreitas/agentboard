@@ -4,17 +4,20 @@ import { FitAddon } from 'xterm-addon-fit'
 import { WebglAddon } from 'xterm-addon-webgl'
 import { ClipboardAddon } from '@xterm/addon-clipboard'
 import type { ServerMessage } from '@shared/types'
+import type { ITheme } from 'xterm'
 
 interface UseTerminalOptions {
   sessionId: string | null
   sendMessage: (message: any) => void
   subscribe: (listener: (message: ServerMessage) => void) => () => void
+  theme: ITheme
 }
 
 export function useTerminal({
   sessionId,
   sendMessage,
   subscribe,
+  theme,
 }: UseTerminalOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<Terminal | null>(null)
@@ -22,29 +25,31 @@ export function useTerminal({
   const webglAddonRef = useRef<WebglAddon | null>(null)
   const resizeTimer = useRef<number | null>(null)
   const sessionIdRef = useRef<string | null>(sessionId)
+  const initializedRef = useRef(false)
 
   useEffect(() => {
     sessionIdRef.current = sessionId
   }, [sessionId])
 
+  // Terminal initialization - only once
   useEffect(() => {
-    if (!containerRef.current || terminalRef.current) {
+    const container = containerRef.current
+    if (!container || initializedRef.current) {
       return
     }
 
+    // Clear any existing content in container
+    container.innerHTML = ''
+    initializedRef.current = true
+
     const terminal = new Terminal({
-      fontFamily: '"JetBrains Mono", monospace',
+      fontFamily: '"JetBrains Mono", "SF Mono", "Fira Code", monospace',
       fontSize: 13,
       lineHeight: 1.4,
       scrollback: 5000,
       cursorBlink: true,
       convertEol: true,
-      theme: {
-        background: '#171513',
-        foreground: '#f6f2ec',
-        cursor: '#f3b24f',
-        selectionBackground: 'rgba(243, 178, 79, 0.3)',
-      },
+      theme,
     })
 
     const fitAddon = new FitAddon()
@@ -59,7 +64,7 @@ export function useTerminal({
       // WebGL addon is optional.
     }
 
-    terminal.open(containerRef.current)
+    terminal.open(container)
     fitAddon.fit()
 
     terminal.attachCustomKeyEventHandler((event) => {
@@ -101,10 +106,23 @@ export function useTerminal({
       } catch {
         // Ignore errors during terminal disposal (can happen in React StrictMode)
       }
+      // Clear container
+      if (container) {
+        container.innerHTML = ''
+      }
       terminalRef.current = null
       fitAddonRef.current = null
+      initializedRef.current = false
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- theme handled by separate effect
   }, [sendMessage])
+
+  // Update theme when it changes (without recreating terminal)
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.options.theme = theme
+    }
+  }, [theme])
 
   useEffect(() => {
     if (!terminalRef.current) {
@@ -115,7 +133,7 @@ export function useTerminal({
       // Clear terminal completely before attaching to new session
       terminalRef.current.reset()
       terminalRef.current.clear()
-      terminalRef.current.writeln(`\u001b[33mAttached to ${sessionId}\u001b[0m`)
+      terminalRef.current.writeln(`\u001b[90mAttached to ${sessionId}\u001b[0m`)
       sendMessage({ type: 'terminal-attach', sessionId })
     }
 
@@ -153,6 +171,7 @@ export function useTerminal({
 
     const terminal = terminalRef.current
     const fitAddon = fitAddonRef.current
+    const container = containerRef.current
 
     const handleResize = () => {
       if (resizeTimer.current) {
@@ -173,7 +192,7 @@ export function useTerminal({
     }
 
     const observer = new ResizeObserver(handleResize)
-    observer.observe(containerRef.current)
+    observer.observe(container)
     handleResize()
 
     return () => {

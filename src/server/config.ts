@@ -14,4 +14,7 @@ export const config = {
   claudeProjectsDir:
     process.env.CLAUDE_PROJECTS_DIR ||
     path.join(homeDir, '.claude', 'projects'),
+  codexSessionsDir:
+    process.env.CODEX_SESSIONS_DIR ||
+    path.join(homeDir, '.codex', 'sessions'),
 }

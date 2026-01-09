@@ -12,6 +12,7 @@
     "lint": "oxlint .",
     "typecheck": "tsc --noEmit",
     "test": "bun test src/server/__tests__",
+    "test:coverage": "bun test --coverage --coverage-reporter=lcov --coverage-reporter=text src/server/__tests__",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "prepare": "git config core.hooksPath .githooks"

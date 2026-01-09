@@ -2,19 +2,65 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+/* Dark theme (default) */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Base surfaces */
+  --bg-base: #0a0a0a;
+  --bg-elevated: #111111;
+  --bg-surface: #161616;
+  --bg-hover: #1c1c1c;
+
+  /* Text */
+  --text-primary: #e5e5e5;
+  --text-secondary: #a3a3a3;
+  --text-muted: #525252;
+
+  /* Borders */
+  --border: #262626;
+  --border-subtle: #1a1a1a;
+
+  /* Status colors */
+  --working: #22c55e;
+  --approval: #f59e0b;
+  --waiting: #3b82f6;
+  --idle: #525252;
+  --danger: #ef4444;
+
+  /* Accent */
+  --accent: #3b82f6;
+}
+
+/* Light theme */
+[data-theme="light"] {
   color-scheme: light;
-  --ink: #1b1a16;
-  --muted: #6f665d;
-  --surface: rgba(255, 255, 255, 0.75);
-  --surface-strong: #f9f4ec;
-  --accent: #1f6f78;
-  --accent-soft: #cfe7e5;
-  --working: #1f6f78;
-  --approval: #f3b24f;
-  --waiting: #3c7dc1;
-  --idle: #9a9489;
-  --danger: #d75b5b;
+
+  /* Base surfaces */
+  --bg-base: #fafafa;
+  --bg-elevated: #ffffff;
+  --bg-surface: #f5f5f5;
+  --bg-hover: #e5e5e5;
+
+  /* Text */
+  --text-primary: #171717;
+  --text-secondary: #525252;
+  --text-muted: #a3a3a3;
+
+  /* Borders */
+  --border: #e5e5e5;
+  --border-subtle: #f0f0f0;
+
+  /* Status colors - slightly darker for light bg */
+  --working: #16a34a;
+  --approval: #d97706;
+  --waiting: #2563eb;
+  --idle: #737373;
+  --danger: #dc2626;
+
+  /* Accent */
+  --accent: #2563eb;
 }
 
 * {
@@ -24,64 +70,159 @@
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "Space Grotesk", sans-serif;
-  color: var(--ink);
-  background:
-    radial-gradient(900px circle at 12% -10%, rgba(255, 242, 216, 0.9), transparent 60%),
-    radial-gradient(800px circle at 95% 10%, rgba(210, 237, 244, 0.85), transparent 55%),
-    linear-gradient(180deg, #f2ece4 0%, #f7f1ea 55%, #f0ebe3 100%);
-}
-
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background-image:
-    linear-gradient(120deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0) 55%),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.25) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.2) 1px, transparent 1px);
-  background-size: 100% 100%, 28px 28px, 28px 28px;
-  opacity: 0.45;
-  z-index: -1;
+  font-family: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  -webkit-font-smoothing: antialiased;
 }
 
 #root {
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 ::selection {
-  background: rgba(31, 111, 120, 0.2);
+  background: rgba(59, 130, 246, 0.3);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
 
 @layer components {
-  .glass-card {
-    @apply border border-white/60 shadow-glow backdrop-blur-md;
-    background-color: var(--surface);
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
   }
 
-  .status-pill {
-    @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold tracking-wide;
+  .btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    background: #2563eb;
+    border-color: #2563eb;
+  }
+
+  .btn-danger {
+    color: var(--danger);
+    border-color: var(--danger);
+    background: transparent;
+  }
+
+  .btn-danger:hover {
+    background: var(--danger);
+    color: white;
+  }
+
+  .input {
+    @apply w-full px-3 py-2 text-sm;
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+  }
+
+  .input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .input::placeholder {
+    color: var(--text-muted);
   }
 }
 
+/* Status bar indicator */
+.status-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+}
+
+.status-bar-working { background: var(--working); }
+.status-bar-approval { background: var(--approval); }
+.status-bar-waiting { background: var(--waiting); }
+.status-bar-idle { background: var(--idle); }
+
+/* Pulse animation for approval needed */
+@keyframes pulse-approval {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.pulse-approval {
+  animation: pulse-approval 1.5s ease-in-out infinite;
+}
+
+/* Terminal styles */
 .xterm {
-  font-family: "JetBrains Mono", monospace;
+  font-family: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+  padding: 8px;
 }
 
 .xterm .xterm-viewport {
-  scrollbar-color: rgba(27, 26, 22, 0.3) transparent;
+  scrollbar-color: var(--border) transparent;
 }
 
 .xterm .xterm-viewport::-webkit-scrollbar {
-  width: 10px;
+  width: 8px;
 }
 
 .xterm .xterm-viewport::-webkit-scrollbar-thumb {
-  background: rgba(27, 26, 22, 0.2);
-  border-radius: 999px;
+  background: var(--border);
+  border-radius: 4px;
 }
 
-.terminal-shell {
-  touch-action: pan-y;
+/* Session row hover */
+.session-row {
+  position: relative;
+  transition: background-color 0.1s ease;
+}
+
+.session-row:hover {
+  background: var(--bg-hover);
+}
+
+.session-row.selected {
+  background: var(--bg-surface);
+}
+
+/* Mobile terminal overlay */
+@media (max-width: 767px) {
+  .terminal-mobile-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-base);
+  }
 }

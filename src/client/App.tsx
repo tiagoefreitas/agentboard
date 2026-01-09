@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Session, ServerMessage } from '@shared/types'
 import Header from './components/Header'
-import Dashboard from './components/Dashboard'
+import SessionList from './components/SessionList'
 import Terminal from './components/Terminal'
 import NewSessionModal from './components/NewSessionModal'
 import { useSessionStore } from './stores/sessionStore'
+import { useThemeStore } from './stores/themeStore'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useNotifications } from './hooks/useNotifications'
 import { useFaviconBadge } from './hooks/useFaviconBadge'
@@ -27,6 +28,8 @@ export default function App() {
     (state) => state.connectionStatus
   )
   const connectionError = useSessionStore((state) => state.connectionError)
+
+  const theme = useThemeStore((state) => state.theme)
 
   const { sendMessage, subscribe } = useWebSocket()
   const { notify, requestPermission } = useNotifications()
@@ -93,8 +96,13 @@ export default function App() {
     sendMessage({ type: 'session-refresh' })
   }
 
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+  }, [theme])
+
   return (
-    <div className="min-h-screen pb-10">
+    <div className="flex h-screen flex-col">
       <Header
         connectionStatus={connectionStatus}
         needsApprovalCount={needsApprovalCount}
@@ -102,22 +110,27 @@ export default function App() {
         onRefresh={handleRefresh}
       />
 
-      <Dashboard
-        sessions={sessions}
-        selectedSessionId={selectedSessionId}
-        onSelect={setSelectedSessionId}
-        onKill={handleKillSession}
-        loading={!hasLoaded}
-        error={connectionError || serverError}
-      />
+      <div className="flex min-h-0 flex-1">
+        {/* Sidebar - hidden on mobile when session selected */}
+        <div className={`w-full shrink-0 md:w-60 lg:w-72 ${selectedSession ? 'hidden md:block' : ''}`}>
+          <SessionList
+            sessions={sessions}
+            selectedSessionId={selectedSessionId}
+            onSelect={setSelectedSessionId}
+            onKill={handleKillSession}
+            loading={!hasLoaded}
+            error={connectionError || serverError}
+          />
+        </div>
 
-      <div className="px-6">
+        {/* Terminal - hero element */}
         <Terminal
           session={selectedSession}
           connectionStatus={connectionStatus}
           sendMessage={sendMessage}
           subscribe={subscribe}
           onClose={() => setSelectedSessionId(null)}
+          pendingApprovals={needsApprovalCount}
         />
       </div>
 
