@@ -19,7 +19,6 @@ export default {
         working: 'var(--working)',
         approval: 'var(--approval)',
         waiting: 'var(--waiting)',
-        idle: 'var(--idle)',
         danger: 'var(--danger)',
         accent: 'var(--accent)',
       },

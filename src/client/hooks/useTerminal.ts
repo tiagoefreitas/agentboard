@@ -6,6 +6,30 @@ import { ClipboardAddon } from '@xterm/addon-clipboard'
 import type { ServerMessage } from '@shared/types'
 import type { ITheme } from 'xterm'
 
+// Text presentation selector - forces text rendering instead of emoji
+const TEXT_VS = '\uFE0E'
+
+// Characters that iOS Safari renders as emoji but should be text
+// Only add characters here that are verified to cause issues
+const EMOJI_TO_TEXT_CHARS = new Set([
+  '\u23FA', // ⏺ Black Circle for Record (Claude's bullet)
+])
+
+/**
+ * Add text presentation selector after characters that iOS renders as emoji.
+ * This forces the browser to render them as text glyphs instead.
+ */
+function forceTextPresentation(data: string): string {
+  let result = ''
+  for (const char of data) {
+    result += char
+    if (EMOJI_TO_TEXT_CHARS.has(char)) {
+      result += TEXT_VS
+    }
+  }
+  return result
+}
+
 interface UseTerminalOptions {
   sessionId: string | null
   sendMessage: (message: any) => void
@@ -267,7 +291,8 @@ export function useTerminal({
         attachedSession &&
         message.sessionId === attachedSession
       ) {
-        terminal.write(message.data)
+        // Force text presentation for characters iOS renders as emoji
+        terminal.write(forceTextPresentation(message.data))
         // Update scroll position after write
         checkScrollPosition()
       }

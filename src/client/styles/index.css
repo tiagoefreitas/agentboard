@@ -2,6 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Load JetBrains Mono for consistent terminal rendering */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.0.18/files/jetbrains-mono-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.0.18/files/jetbrains-mono-latin-700-normal.woff2') format('woff2');
+}
+
+/* Force text rendering for symbols - prevents iOS emoji fallback */
+@supports (font-variant-emoji: text) {
+  .terminal-text-overlay {
+    font-variant-emoji: text;
+  }
+}
+
 /* Dark theme (default) */
 :root,
 [data-theme="dark"] {
@@ -26,7 +50,6 @@
   --working: #22c55e;
   --approval: #f59e0b;
   --waiting: #3b82f6;
-  --idle: #525252;
   --danger: #ef4444;
 
   /* Accent */
@@ -56,7 +79,6 @@
   --working: #16a34a;
   --approval: #d97706;
   --waiting: #2563eb;
-  --idle: #737373;
   --danger: #dc2626;
 
   /* Accent */
@@ -180,7 +202,6 @@ body {
 .status-bar-working { background: var(--working); }
 .status-bar-approval { background: var(--approval); }
 .status-bar-waiting { background: var(--waiting); }
-.status-bar-idle { background: var(--idle); }
 
 /* Pulse animation for approval needed */
 @keyframes pulse-approval {

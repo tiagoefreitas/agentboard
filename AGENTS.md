@@ -52,7 +52,7 @@ Real-time dashboard for Claude Code sessions. Streams tmux terminal output via W
 
 - tmux session `agentboard` holds all windows
 - Claude logs: `~/.claude/projects/<path>/*.jsonl`
-- Status machine: idle → working → waiting
+- Status machine: unknown -> working -> waiting; needs_approval on tool stall
 
 ## Ports
 

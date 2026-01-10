@@ -4,6 +4,7 @@ import type { ConnectionStatus } from '../stores/sessionStore'
 import { useTerminal } from '../hooks/useTerminal'
 import { useThemeStore, terminalThemes } from '../stores/themeStore'
 import TerminalControls from './TerminalControls'
+import TerminalTextOverlay from './TerminalTextOverlay'
 
 interface TerminalProps {
   session: Session | null
@@ -43,12 +44,16 @@ export default function Terminal({
   const theme = useThemeStore((state) => state.theme)
   const terminalTheme = terminalThemes[theme]
   const [showScrollButton, setShowScrollButton] = useState(false)
+  const [showTextOverlay, setShowTextOverlay] = useState(false)
   const [fontSize, setFontSize] = useState(() => {
     const saved = localStorage.getItem('terminal-font-size')
     return saved ? parseInt(saved, 10) : 13
   })
   const lastTouchY = useRef<number | null>(null)
   const accumulatedDelta = useRef<number>(0)
+  const lastTapTime = useRef<number>(0)
+  const tapTimeout = useRef<number | null>(null)
+  const longPressTimer = useRef<number | null>(null)
 
   const adjustFontSize = useCallback((delta: number) => {
     setFontSize((prev) => {
@@ -73,22 +78,90 @@ export default function Terminal({
     terminalRef.current?.scrollToBottom()
   }, [terminalRef])
 
-  // Touch scroll - send mouse wheel escape sequences to tmux
+  // Touch scroll + double-tap/long-press detection for text selection (iOS-like)
+  // Single tap (after confirming not double-tap) focuses terminal for keyboard input
   useEffect(() => {
     const container = containerRef.current
     if (!container || !session) return
 
+    // Check if mobile
+    const isMobile = window.matchMedia('(max-width: 767px)').matches
+    if (!isMobile) return
+
+    // Don't handle touch when text overlay is shown
+    if (showTextOverlay) return
+
+    const DOUBLE_TAP_DELAY = 500 // ms between taps
+    const LONG_PRESS_DELAY = 500 // ms to trigger long press
+    const TAP_MOVE_THRESHOLD = 10 // pixels - if moved more, it's not a tap
+
+    let touchStartPos = { x: 0, y: 0 }
+    let hasMoved = false
+    let longPressTriggered = false
+
+    // Get textarea and keep it disabled to prevent auto-focus
+    const textarea = container.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null
+    if (textarea) {
+      textarea.setAttribute('disabled', 'true')
+    }
+
+    const activateOverlay = () => {
+      if ('vibrate' in navigator) {
+        navigator.vibrate(10)
+      }
+      setShowTextOverlay(true)
+    }
+
+    const focusTerminalInput = () => {
+      // Enable, focus, then re-disable on blur
+      if (textarea) {
+        textarea.removeAttribute('disabled')
+        textarea.focus()
+
+        const handleBlur = () => {
+          textarea.setAttribute('disabled', 'true')
+          textarea.removeEventListener('blur', handleBlur)
+        }
+        textarea.addEventListener('blur', handleBlur)
+      }
+    }
+
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 1) {
+        touchStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+        hasMoved = false
+        longPressTriggered = false
         lastTouchY.current = e.touches[0].clientY
         accumulatedDelta.current = 0
+
+        // Start long-press timer
+        longPressTimer.current = window.setTimeout(() => {
+          if (!hasMoved) {
+            longPressTriggered = true
+            activateOverlay()
+          }
+        }, LONG_PRESS_DELAY)
       }
     }
 
     const handleTouchMove = (e: TouchEvent) => {
       if (e.touches.length !== 1 || lastTouchY.current === null) return
 
+      const x = e.touches[0].clientX
       const y = e.touches[0].clientY
+
+      // Check if moved beyond tap threshold
+      const dx = Math.abs(x - touchStartPos.x)
+      const dy = Math.abs(y - touchStartPos.y)
+      if (dx > TAP_MOVE_THRESHOLD || dy > TAP_MOVE_THRESHOLD) {
+        hasMoved = true
+        // Cancel long-press if moved
+        if (longPressTimer.current) {
+          window.clearTimeout(longPressTimer.current)
+          longPressTimer.current = null
+        }
+      }
+
       const deltaY = lastTouchY.current - y
       lastTouchY.current = y
 
@@ -98,13 +171,8 @@ export default function Terminal({
 
       if (scrollEvents !== 0) {
         // Send mouse wheel escape sequences (SGR mode)
-        // Button 64 = scroll up (show older), Button 65 = scroll down (show newer)
-        // Drag down (negative scrollEvents) = scroll up (older content)
         const button = scrollEvents < 0 ? 64 : 65
         const count = Math.abs(scrollEvents)
-
-        // SGR mouse format: \x1b[<button;col;rowM
-        // Use middle of terminal as coordinates
         const cols = terminalRef.current?.cols ?? 80
         const rows = terminalRef.current?.rows ?? 24
         const col = Math.floor(cols / 2)
@@ -122,8 +190,42 @@ export default function Terminal({
     }
 
     const handleTouchEnd = () => {
+      // Cancel long-press timer
+      if (longPressTimer.current) {
+        window.clearTimeout(longPressTimer.current)
+        longPressTimer.current = null
+      }
+
       lastTouchY.current = null
       accumulatedDelta.current = 0
+
+      // Skip if long-press already triggered overlay
+      if (longPressTriggered) return
+
+      // Only count as tap if didn't move much
+      if (hasMoved) return
+
+      const now = Date.now()
+      const timeSinceLastTap = now - lastTapTime.current
+
+      if (timeSinceLastTap < DOUBLE_TAP_DELAY) {
+        // Double tap detected - show text selection overlay
+        if (tapTimeout.current) {
+          window.clearTimeout(tapTimeout.current)
+          tapTimeout.current = null
+        }
+        activateOverlay()
+        lastTapTime.current = 0
+      } else {
+        // First tap - wait to see if second tap comes
+        // If no second tap, focus terminal for keyboard input
+        lastTapTime.current = now
+        tapTimeout.current = window.setTimeout(() => {
+          lastTapTime.current = 0
+          // Single tap confirmed - focus terminal for keyboard input
+          focusTerminalInput()
+        }, DOUBLE_TAP_DELAY)
+      }
     }
 
     container.addEventListener('touchstart', handleTouchStart, { passive: true })
@@ -131,11 +233,21 @@ export default function Terminal({
     container.addEventListener('touchend', handleTouchEnd, { passive: true })
 
     return () => {
+      if (tapTimeout.current) {
+        window.clearTimeout(tapTimeout.current)
+      }
+      if (longPressTimer.current) {
+        window.clearTimeout(longPressTimer.current)
+      }
       container.removeEventListener('touchstart', handleTouchStart)
       container.removeEventListener('touchmove', handleTouchMove)
       container.removeEventListener('touchend', handleTouchEnd)
+      // Re-enable textarea on cleanup
+      if (textarea) {
+        textarea.removeAttribute('disabled')
+      }
     }
-  }, [session, sendMessage, containerRef, terminalRef])
+  }, [session, sendMessage, containerRef, terminalRef, showTextOverlay])
 
   const handleSendKey = useCallback(
     (key: string) => {
@@ -211,8 +323,17 @@ export default function Terminal({
           </div>
         )}
 
+        {/* Text overlay for native iOS text selection */}
+        {showTextOverlay && terminalRef.current && (
+          <TerminalTextOverlay
+            terminal={terminalRef.current}
+            fontSize={fontSize}
+            onDismiss={() => setShowTextOverlay(false)}
+          />
+        )}
+
         {/* Scroll to bottom button */}
-        {showScrollButton && session && (
+        {showScrollButton && session && !showTextOverlay && (
           <button
             onClick={scrollToBottom}
             className="absolute bottom-4 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-surface border border-border shadow-lg hover:bg-hover transition-colors"
