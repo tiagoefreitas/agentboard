@@ -81,9 +81,13 @@ export default function NewSessionModal({
       setName('')
       setCommand('')
       setCommandMode('claude')
-      // Restore focus to previously focused element
-      previouslyFocusedRef.current?.focus()
+      // Restore focus to previously focused element after delay
+      // (allows terminal to settle before accepting input)
+      const prevElement = previouslyFocusedRef.current
       previouslyFocusedRef.current = null
+      if (prevElement) {
+        setTimeout(() => prevElement.focus(), 300)
+      }
       return
     }
     // Save currently focused element before modal takes focus
