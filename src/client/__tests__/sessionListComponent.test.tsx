@@ -7,11 +7,15 @@ import { useSettingsStore } from '../stores/settingsStore'
 const globalAny = globalThis as typeof globalThis & {
   setTimeout?: typeof setTimeout
   clearTimeout?: typeof clearTimeout
+  setInterval?: typeof setInterval
+  clearInterval?: typeof clearInterval
   window?: Window & typeof globalThis
 }
 
 const originalSetTimeout = globalAny.setTimeout
 const originalClearTimeout = globalAny.clearTimeout
+const originalSetInterval = globalAny.setInterval
+const originalClearInterval = globalAny.clearInterval
 const originalWindow = globalAny.window
 
 const baseSession: Session = {
@@ -49,6 +53,8 @@ beforeEach(() => {
 afterEach(() => {
   globalAny.setTimeout = originalSetTimeout
   globalAny.clearTimeout = originalClearTimeout
+  globalAny.setInterval = originalSetInterval
+  globalAny.clearInterval = originalClearInterval
   globalAny.window = originalWindow
   useSettingsStore.setState({
     sessionSortMode: 'created',
@@ -220,5 +226,42 @@ describe('SessionList component', () => {
     act(() => {
       renderer.unmount()
     })
+  })
+
+  test('refresh interval registers and clears on unmount', () => {
+    const intervals: Array<{ id: number; delay: number }> = []
+    const cleared: number[] = []
+
+    globalAny.setInterval = ((callback: () => void, delay?: number) => {
+      const id = 42
+      intervals.push({ id, delay: delay ?? 0 })
+      return id as unknown as ReturnType<typeof setInterval>
+    }) as typeof setInterval
+    globalAny.clearInterval = ((id: number) => {
+      cleared.push(id)
+    }) as typeof clearInterval
+
+    let renderer!: TestRenderer.ReactTestRenderer
+
+    act(() => {
+      renderer = TestRenderer.create(
+        <SessionList
+          sessions={[baseSession]}
+          selectedSessionId={null}
+          loading={false}
+          error={null}
+          onSelect={() => {}}
+          onRename={() => {}}
+        />
+      )
+    })
+
+    expect(intervals).toEqual([{ id: 42, delay: 30000 }])
+
+    act(() => {
+      renderer.unmount()
+    })
+
+    expect(cleared).toEqual([42])
   })
 })

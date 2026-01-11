@@ -17,8 +17,12 @@ type TmuxRunner = (args: string[]) => string
 type CapturePane = (tmuxWindow: string) => string | null
 type NowFn = () => number
 
-// Cache of pane content hashes for change detection
-const paneContentCache = new Map<string, string>()
+// Cache of pane content and last-changed timestamp for change detection
+interface PaneCache {
+  content: string
+  lastChanged: number
+}
+const paneContentCache = new Map<string, PaneCache>()
 
 export class SessionManager {
   private sessionName: string
@@ -201,19 +205,21 @@ export class SessionManager {
       .map((line) => parseWindow(line))
       .map((window) => {
         const tmuxWindow = `${sessionName}:${window.id}`
-        const activityTimestamp = window.activity
-          ? window.activity * 1000
-          : this.now()
         const creationTimestamp = window.creation
           ? window.creation * 1000
           : this.now()
+        const { status, lastChanged } = inferStatus(
+          tmuxWindow,
+          this.capturePaneContent,
+          this.now
+        )
         return {
           id: `${sessionName}:${window.id}`,
           name: window.name,
           tmuxWindow,
           projectPath: window.path,
-          status: inferStatus(tmuxWindow, this.capturePaneContent),
-          lastActivity: new Date(activityTimestamp).toISOString(),
+          status,
+          lastActivity: new Date(lastChanged).toISOString(),
           createdAt: new Date(creationTimestamp).toISOString(),
           agentType: inferAgentType(window.command),
           source,
@@ -359,31 +365,40 @@ function resolveProjectPath(value: string): string {
   return path.resolve(trimmed)
 }
 
+interface StatusResult {
+  status: SessionStatus
+  lastChanged: number
+}
+
 function inferStatus(
   tmuxWindow: string,
-  capture: CapturePane = capturePaneContent
-): SessionStatus {
+  capture: CapturePane = capturePaneContent,
+  now: NowFn = Date.now
+): StatusResult {
   const content = capture(tmuxWindow)
   if (content === null) {
-    return 'unknown'
+    return { status: 'unknown', lastChanged: now() }
   }
 
   // Check for permission prompts first (takes priority over working/waiting)
   if (detectsPermissionPrompt(content)) {
-    return 'permission'
+    const cached = paneContentCache.get(tmuxWindow)
+    return { status: 'permission', lastChanged: cached?.lastChanged ?? now() }
   }
 
-  const cacheKey = tmuxWindow
-  const previousContent = paneContentCache.get(cacheKey)
-  paneContentCache.set(cacheKey, content)
+  const cached = paneContentCache.get(tmuxWindow)
+  const contentChanged = cached === undefined || cached.content !== content
+  const lastChanged = contentChanged ? now() : (cached?.lastChanged ?? now())
+
+  paneContentCache.set(tmuxWindow, { content, lastChanged })
 
   // If no previous content, assume waiting (just started monitoring)
-  if (previousContent === undefined) {
-    return 'waiting'
+  if (cached === undefined) {
+    return { status: 'waiting', lastChanged }
   }
 
   // If content changed, it's working
-  return content !== previousContent ? 'working' : 'waiting'
+  return { status: contentChanged ? 'working' : 'waiting', lastChanged }
 }
 
 function capturePaneContent(tmuxWindow: string): string | null {

@@ -77,4 +77,17 @@ describe('SessionRegistry', () => {
     expect(result).toBeUndefined()
     expect(updates).toHaveLength(0)
   })
+
+  test('replaceSessions skips session emit when data is unchanged', () => {
+    const registry = new SessionRegistry()
+    const sessionsEvents: Session[][] = []
+
+    registry.on('sessions', (sessions) => sessionsEvents.push(sessions))
+
+    const session = makeSession({ id: 'alpha' })
+    registry.replaceSessions([session])
+    registry.replaceSessions([session])
+
+    expect(sessionsEvents).toHaveLength(1)
+  })
 })
