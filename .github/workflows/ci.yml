@@ -25,8 +25,12 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      - name: Test
+        run: bun run test
+
       - name: Test (coverage)
         run: bun run test:coverage
+        continue-on-error: true
 
       - name: Upload coverage artifact
         if: always()
