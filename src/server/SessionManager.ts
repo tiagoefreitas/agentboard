@@ -4,9 +4,6 @@ import { config } from './config'
 import { generateSessionName } from './nameGenerator'
 import type { AgentType, Session, SessionStatus } from '../shared/types'
 
-// How many seconds of inactivity before considering a session "waiting"
-const IDLE_THRESHOLD_SECONDS = 2
-
 interface WindowInfo {
   id: string
   name: string
@@ -14,6 +11,9 @@ interface WindowInfo {
   activity: number
   command: string
 }
+
+// Cache of pane content hashes for change detection
+const paneContentCache = new Map<string, string>()
 
 export class SessionManager {
   private sessionName: string
@@ -35,8 +35,17 @@ export class SessionManager {
 
     const managed = this.listWindowsForSession(this.sessionName, 'managed')
     const externals = this.listExternalWindows()
+    const allSessions = [...managed, ...externals]
 
-    return [...managed, ...externals]
+    // Clean up cache entries for windows that no longer exist
+    const currentWindows = new Set(allSessions.map((s) => s.tmuxWindow))
+    for (const key of paneContentCache.keys()) {
+      if (!currentWindows.has(key)) {
+        paneContentCache.delete(key)
+      }
+    }
+
+    return allSessions
   }
 
   createWindow(projectPath: string, name?: string, command?: string): Session {
@@ -94,6 +103,7 @@ export class SessionManager {
 
   killWindow(tmuxWindow: string): void {
     runTmux(['kill-window', '-t', tmuxWindow])
+    paneContentCache.delete(tmuxWindow)
   }
 
   renameWindow(tmuxWindow: string, newName: string): void {
@@ -167,19 +177,22 @@ export class SessionManager {
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => parseWindow(line))
-      .map((window) => ({
-        id: `${sessionName}:${window.id}`,
-        name: window.name,
-        tmuxWindow: `${sessionName}:${window.id}`,
-        projectPath: window.path,
-        status: inferStatus(window.activity),
-        lastActivity: new Date(
-          window.activity ? window.activity * 1000 : Date.now()
-        ).toISOString(),
-        agentType: inferAgentType(window.command),
-        source,
-        command: window.command || undefined,
-      }))
+      .map((window) => {
+        const tmuxWindow = `${sessionName}:${window.id}`
+        return {
+          id: `${sessionName}:${window.id}`,
+          name: window.name,
+          tmuxWindow,
+          projectPath: window.path,
+          status: inferStatus(tmuxWindow),
+          lastActivity: new Date(
+            window.activity ? window.activity * 1000 : Date.now()
+          ).toISOString(),
+          agentType: inferAgentType(window.command),
+          source,
+          command: window.command || undefined,
+        }
+      })
   }
 
   private findAvailableName(base: string, existing: Set<string>): string {
@@ -316,15 +329,38 @@ function resolveProjectPath(value: string): string {
   return path.resolve(trimmed)
 }
 
-function inferStatus(activityTimestamp: number): SessionStatus {
-  if (!activityTimestamp) {
+function inferStatus(tmuxWindow: string): SessionStatus {
+  const content = capturePaneContent(tmuxWindow)
+  if (content === null) {
     return 'unknown'
   }
 
-  const now = Math.floor(Date.now() / 1000)
-  const idleSeconds = now - activityTimestamp
+  const cacheKey = tmuxWindow
+  const previousContent = paneContentCache.get(cacheKey)
+  paneContentCache.set(cacheKey, content)
 
-  return idleSeconds < IDLE_THRESHOLD_SECONDS ? 'working' : 'waiting'
+  // If no previous content, assume waiting (just started monitoring)
+  if (previousContent === undefined) {
+    return 'waiting'
+  }
+
+  // If content changed, it's working
+  return content !== previousContent ? 'working' : 'waiting'
+}
+
+function capturePaneContent(tmuxWindow: string): string | null {
+  try {
+    const result = Bun.spawnSync(
+      ['tmux', 'capture-pane', '-t', tmuxWindow, '-p'],
+      { stdout: 'pipe', stderr: 'pipe' }
+    )
+    if (result.exitCode !== 0) {
+      return null
+    }
+    return result.stdout.toString()
+  } catch {
+    return null
+  }
 }
 
 function inferAgentType(command: string): AgentType | undefined {
