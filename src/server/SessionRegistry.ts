@@ -48,28 +48,17 @@ export class SessionRegistry extends EventEmitter {
     }
 
     // Check if anything actually changed
-    const changedSessions: string[] = []
-    for (const next of nextMap.values()) {
-      const existing = this.sessions.get(next.id)
-      if (!existing || !sessionsEqual(existing, next)) {
-        const changes: string[] = []
-        if (!existing) {
-          changes.push('new')
-        } else {
-          if (existing.status !== next.status) changes.push(`status: ${existing.status} → ${next.status}`)
-          if (existing.lastActivity !== next.lastActivity) changes.push(`lastActivity changed`)
-          if (existing.name !== next.name) changes.push(`name: ${existing.name} → ${next.name}`)
-        }
-        changedSessions.push(`${next.name}: ${changes.join(', ')}`)
-      }
-    }
-
-    const hasChanges = removedIds.size > 0 || nextMap.size !== this.sessions.size || changedSessions.length > 0
+    const hasChanges =
+      removedIds.size > 0 ||
+      nextMap.size !== this.sessions.size ||
+      Array.from(nextMap.values()).some((next) => {
+        const existing = this.sessions.get(next.id)
+        return !existing || !sessionsEqual(existing, next)
+      })
 
     this.sessions = nextMap
 
     if (hasChanges) {
-      console.log('[SessionRegistry] Changes detected:', changedSessions.length > 0 ? changedSessions : 'added/removed')
       this.emit('sessions', this.getAll())
     }
 
