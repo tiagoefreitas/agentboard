@@ -7,6 +7,8 @@
 import { useState, useRef, useEffect } from 'react'
 import type { Session } from '@shared/types'
 import { CornerDownLeftIcon } from '@untitledui-icons/react/line'
+import DPad from './DPad'
+import NumPad from './NumPad'
 
 interface SessionInfo {
   id: string
@@ -47,14 +49,14 @@ const PasteIcon = (
   </svg>
 )
 
-const CONTROL_KEYS: ControlKey[] = [
+// Keys before the numpad
+const CONTROL_KEYS_LEFT: ControlKey[] = [
   { label: '^C', key: '\x03', className: 'text-danger border-danger/40' },
   { label: 'esc', key: '\x1b' },
-  { label: '1', key: '1' },
-  { label: '2', key: '2' },
-  { label: '3', key: '3' },
-  { label: '↑', key: '\x1b[A' },
-  { label: '↓', key: '\x1b[B' },
+]
+
+// Keys after the d-pad
+const CONTROL_KEYS_RIGHT: ControlKey[] = [
   { label: BackspaceIcon, key: '\x17' }, // Ctrl+W: delete word backward
   { label: <CornerDownLeftIcon width={18} height={18} />, key: '\r', grow: true, className: 'bg-accent/20 text-accent border-accent/40' },
 ]
@@ -83,13 +85,55 @@ export default function TerminalControls({
 }: TerminalControlsProps) {
   const [showPasteInput, setShowPasteInput] = useState(false)
   const [pasteValue, setPasteValue] = useState('')
+  const [isUploading, setIsUploading] = useState(false)
   const pasteInputRef = useRef<HTMLInputElement>(null)
+  const pasteZoneRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (showPasteInput && pasteInputRef.current) {
       pasteInputRef.current.focus()
     }
   }, [showPasteInput])
+
+  // Handle paste events in the modal (for images via native paste gesture)
+  useEffect(() => {
+    if (!showPasteInput) return
+    const zone = pasteZoneRef.current
+    if (!zone) return
+
+    const handlePaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault()
+          const blob = item.getAsFile()
+          if (!blob) continue
+
+          setIsUploading(true)
+          try {
+            const formData = new FormData()
+            formData.append('image', blob, `paste.${item.type.split('/')[1] || 'png'}`)
+            const res = await fetch('/api/paste-image', { method: 'POST', body: formData })
+            if (res.ok) {
+              const { path } = await res.json()
+              onSendKey(path)
+              setShowPasteInput(false)
+              setPasteValue('')
+              onRefocus?.()
+            }
+          } finally {
+            setIsUploading(false)
+          }
+          return
+        }
+      }
+    }
+
+    zone.addEventListener('paste', handlePaste)
+    return () => zone.removeEventListener('paste', handlePaste)
+  }, [showPasteInput, onSendKey, onRefocus])
 
   const handlePress = (key: string) => {
     if (disabled) return
@@ -109,18 +153,56 @@ export default function TerminalControls({
     const wasKeyboardVisible = isKeyboardVisible?.() ?? false
     triggerHaptic()
 
-    // Try Clipboard API first (works on desktop, some mobile browsers)
+    // Try Clipboard API with image support
     try {
-      const text = await navigator.clipboard.readText()
-      if (text) {
-        onSendKey(text)
-        if (wasKeyboardVisible) {
-          onRefocus?.()
+      const items = await navigator.clipboard.read()
+      for (const item of items) {
+        // Check for image first
+        const imageType = item.types.find((t) => t.startsWith('image/'))
+        if (imageType) {
+          const blob = await item.getType(imageType)
+          // Upload image to server
+          const formData = new FormData()
+          formData.append('image', blob, `paste.${imageType.split('/')[1] || 'png'}`)
+          const res = await fetch('/api/paste-image', { method: 'POST', body: formData })
+          if (res.ok) {
+            const { path } = await res.json()
+            // Send file path - Claude Code can reference images by path
+            onSendKey(path)
+            if (wasKeyboardVisible) {
+              onRefocus?.()
+            }
+            return
+          }
         }
-        return
+
+        // Check for text
+        if (item.types.includes('text/plain')) {
+          const blob = await item.getType('text/plain')
+          const text = await blob.text()
+          if (text) {
+            onSendKey(text)
+            if (wasKeyboardVisible) {
+              onRefocus?.()
+            }
+            return
+          }
+        }
       }
     } catch {
-      // Clipboard API not available - show paste input
+      // Clipboard API not available - try text fallback
+      try {
+        const text = await navigator.clipboard.readText()
+        if (text) {
+          onSendKey(text)
+          if (wasKeyboardVisible) {
+            onRefocus?.()
+          }
+          return
+        }
+      } catch {
+        // Fall through to manual paste input
+      }
     }
 
     // Show paste input for manual paste on iOS
@@ -183,9 +265,53 @@ export default function TerminalControls({
       )}
       {/* Key row */}
       <div className="flex items-center gap-1.5">
-        {CONTROL_KEYS.map((control, i) => (
+        {/* Left controls */}
+        {CONTROL_KEYS_LEFT.map((control, i) => (
           <button
-            key={i}
+            key={`left-${i}`}
+            type="button"
+            className={`
+              terminal-key
+              flex items-center justify-center
+              h-11 min-w-[2.75rem] px-2.5
+              text-sm font-medium
+              bg-surface border border-border rounded-md
+              active:bg-hover active:scale-95
+              transition-transform duration-75
+              select-none touch-manipulation
+              ${control.grow ? 'flex-1' : ''}
+              ${control.className ?? 'text-secondary'}
+              ${disabled ? 'opacity-50' : ''}
+            `}
+            onMouseDown={(e) => e.preventDefault()}
+            onTouchStart={(e) => e.preventDefault()}
+            onClick={() => handlePress(control.key)}
+            disabled={disabled}
+          >
+            {control.label}
+          </button>
+        ))}
+
+        {/* NumPad for number input */}
+        <NumPad
+          onSendKey={onSendKey}
+          disabled={disabled}
+          onRefocus={onRefocus}
+          isKeyboardVisible={isKeyboardVisible}
+        />
+
+        {/* D-pad for arrow keys */}
+        <DPad
+          onSendKey={onSendKey}
+          disabled={disabled}
+          onRefocus={onRefocus}
+          isKeyboardVisible={isKeyboardVisible}
+        />
+
+        {/* Right controls */}
+        {CONTROL_KEYS_RIGHT.map((control, i) => (
+          <button
+            key={`right-${i}`}
             type="button"
             className={`
               terminal-key
@@ -235,26 +361,36 @@ export default function TerminalControls({
       {/* Paste modal - shown when Clipboard API unavailable (iOS) */}
       {showPasteInput && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="mx-4 w-full max-w-sm rounded-lg border border-border bg-elevated p-4 shadow-xl">
-            <h3 className="text-base font-medium text-primary mb-3">Paste Text</h3>
-            <input
-              ref={pasteInputRef}
-              type="text"
-              value={pasteValue}
-              onChange={(e) => setPasteValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  handlePasteSubmit()
-                } else if (e.key === 'Escape') {
-                  e.preventDefault()
-                  handlePasteCancel()
-                }
-              }}
-              placeholder="Paste here..."
-              className="w-full h-11 px-3 text-[16px] bg-surface border border-border rounded-md text-primary placeholder:text-muted outline-none focus:border-accent"
-              style={{ fontSize: '16px' }}
-            />
+          <div
+            ref={pasteZoneRef}
+            className="mx-4 w-full max-w-sm rounded-lg border border-border bg-elevated p-4 shadow-xl"
+          >
+            <h3 className="text-base font-medium text-primary mb-1">Paste</h3>
+            <p className="text-xs text-muted mb-3">Text or image (long-press → Paste)</p>
+            {isUploading ? (
+              <div className="w-full h-11 flex items-center justify-center bg-surface border border-border rounded-md text-secondary">
+                Uploading image...
+              </div>
+            ) : (
+              <input
+                ref={pasteInputRef}
+                type="text"
+                value={pasteValue}
+                onChange={(e) => setPasteValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    handlePasteSubmit()
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    handlePasteCancel()
+                  }
+                }}
+                placeholder="Paste here..."
+                className="w-full h-11 px-3 text-[16px] bg-surface border border-border rounded-md text-primary placeholder:text-muted outline-none focus:border-accent"
+                style={{ fontSize: '16px' }}
+              />
+            )}
             <div className="flex justify-end gap-2 mt-4">
               <button
                 type="button"
@@ -266,7 +402,8 @@ export default function TerminalControls({
               <button
                 type="button"
                 onClick={handlePasteSubmit}
-                className="px-4 py-2 text-sm font-medium bg-accent text-white rounded-md active:scale-95 transition-transform"
+                disabled={isUploading}
+                className="px-4 py-2 text-sm font-medium bg-accent text-white rounded-md active:scale-95 transition-transform disabled:opacity-50"
               >
                 Send
               </button>

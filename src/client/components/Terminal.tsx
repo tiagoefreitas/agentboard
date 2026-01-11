@@ -79,7 +79,7 @@ export default function Terminal({
 
   const adjustFontSize = useCallback((delta: number) => {
     setFontSize((prev) => {
-      const newSize = Math.max(8, Math.min(24, prev + delta))
+      const newSize = Math.max(6, Math.min(24, prev + delta))
       localStorage.setItem('terminal-font-size', String(newSize))
       return newSize
     })

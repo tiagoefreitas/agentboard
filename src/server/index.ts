@@ -49,6 +49,33 @@ registry.on('sessions', (sessions) => {
 app.get('/api/health', (c) => c.json({ ok: true }))
 app.get('/api/sessions', (c) => c.json(registry.getAll()))
 
+// Image upload endpoint for iOS clipboard paste
+app.post('/api/paste-image', async (c) => {
+  try {
+    const formData = await c.req.formData()
+    const file = formData.get('image') as File | null
+    if (!file) {
+      return c.json({ error: 'No image provided' }, 400)
+    }
+
+    // Generate unique filename in temp directory
+    const ext = file.type.split('/')[1] || 'png'
+    const filename = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+    const filepath = `/tmp/${filename}`
+
+    // Write file
+    const buffer = await file.arrayBuffer()
+    await Bun.write(filepath, buffer)
+
+    return c.json({ path: filepath })
+  } catch (error) {
+    return c.json(
+      { error: error instanceof Error ? error.message : 'Upload failed' },
+      500
+    )
+  }
+})
+
 app.use('/*', serveStatic({ root: './dist/client' }))
 
 interface WSData {
