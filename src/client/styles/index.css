@@ -167,7 +167,8 @@ body {
   }
 
   .input {
-    @apply w-full px-3 py-2 text-sm;
+    @apply w-full px-3 py-2;
+    font-size: 16px; /* Prevents iOS zoom on focus */
     background: var(--bg-base);
     border: 1px solid var(--border);
     color: var(--text-primary);
@@ -230,6 +231,20 @@ body {
 
 .ios-native-term-selection .xterm .xterm-accessibility-tree > div {
   line-height: var(--xterm-cell-height, 18px);
+}
+
+/* Position xterm helper textarea in visible area on iOS for paste menu */
+.ios-native-term-selection .xterm-helper-textarea {
+  position: absolute !important;
+  left: 50% !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: auto;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .xterm .xterm-viewport {
