@@ -129,6 +129,63 @@ function createTmuxRunner(sessions: SessionState[], baseIndex = 0) {
 }
 
 describe('SessionManager', () => {
+  test('listWindows keeps lastActivity stable until content changes', () => {
+    const sessionName = 'agentboard-last-activity'
+    const runner = createTmuxRunner(
+      [
+        {
+          name: sessionName,
+          windows: [
+            {
+              id: '1',
+              index: 1,
+              name: 'alpha',
+              path: '/tmp/alpha',
+              activity: 0,
+              command: 'claude',
+            },
+          ],
+        },
+      ],
+      1
+    )
+
+    const contentSequences = new Map<string, string[]>([
+      [`${sessionName}:1`, ['same', 'same', 'changed']],
+    ])
+    const capturePaneContent = (tmuxWindow: string) => {
+      const sequence = contentSequences.get(tmuxWindow) ?? ['']
+      const next = sequence.shift() ?? ''
+      contentSequences.set(tmuxWindow, sequence)
+      return next
+    }
+
+    let now = 1700000000000
+    const manager = new SessionManager(sessionName, {
+      runTmux: runner.runTmux,
+      capturePaneContent,
+      now: () => now,
+    })
+
+    const originalPrefixes = config.discoverPrefixes
+    config.discoverPrefixes = []
+    try {
+      const first = manager.listWindows()[0]
+      now += 60000
+      const second = manager.listWindows()[0]
+      now += 60000
+      const third = manager.listWindows()[0]
+
+      expect(first?.status).toBe('waiting')
+      expect(second?.status).toBe('waiting')
+      expect(third?.status).toBe('working')
+      expect(first?.lastActivity).toBe(second?.lastActivity)
+      expect(third?.lastActivity).not.toBe(second?.lastActivity)
+    } finally {
+      config.discoverPrefixes = originalPrefixes
+    }
+  })
+
   test('listWindows updates status based on pane content changes', () => {
     const managedSession = 'agentboard'
     const externalSession = 'external-1'
