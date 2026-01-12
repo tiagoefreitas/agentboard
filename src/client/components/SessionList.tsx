@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect, useReducer } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
+import { HandIcon } from '@untitledui-icons/react/line'
 import type { Session } from '@shared/types'
 import { sortSessions } from '../utils/sessions'
-import { formatCommandLabel } from '../utils/sessionLabel'
+import { getPathLeaf } from '../utils/sessionLabel'
 import { useSettingsStore } from '../stores/settingsStore'
 import { getNavShortcutMod } from '../utils/device'
+import AgentIcon from './AgentIcon'
 
 interface SessionListProps {
   sessions: Session[]
@@ -20,20 +22,6 @@ const statusBarClass: Record<Session['status'], string> = {
   waiting: 'status-bar-waiting',
   permission: 'status-bar-approval pulse-approval',
   unknown: 'status-bar-waiting',
-}
-
-const statusLabel: Record<Session['status'], string> = {
-  working: 'Working',
-  waiting: 'Waiting',
-  permission: 'Needs Input',
-  unknown: 'Unknown',
-}
-
-const statusTextClass: Record<Session['status'], string> = {
-  working: 'text-working',
-  waiting: 'text-waiting',
-  permission: 'text-approval',
-  unknown: 'text-muted',
 }
 
 // Force re-render every 30s to update relative timestamps
@@ -102,7 +90,7 @@ export default function SessionList({
         ) : (
           <div className="py-1">
             <AnimatePresence initial={false}>
-              {sortedSessions.map((session, index) => (
+              {sortedSessions.map((session) => (
                 <motion.div
                   key={session.id}
                   layout={!prefersReducedMotion}
@@ -118,7 +106,6 @@ export default function SessionList({
                     session={session}
                     isSelected={session.id === selectedSessionId}
                     isEditing={session.id === editingSessionId}
-                    shortcutIndex={index}
                     onSelect={() => onSelect(session.id)}
                     onStartEdit={() => setEditingSessionId(session.id)}
                     onCancelEdit={() => setEditingSessionId(null)}
@@ -147,7 +134,6 @@ interface SessionRowProps {
   session: Session
   isSelected: boolean
   isEditing: boolean
-  shortcutIndex: number
   onSelect: () => void
   onStartEdit: () => void
   onCancelEdit: () => void
@@ -158,19 +144,17 @@ function SessionRow({
   session,
   isSelected,
   isEditing,
-  shortcutIndex,
   onSelect,
   onStartEdit,
   onCancelEdit,
   onRename,
 }: SessionRowProps) {
   const lastActivity = formatRelativeTime(session.lastActivity)
-  const shortcutLabel =
-    !isEditing && shortcutIndex < 9 ? String(shortcutIndex + 1) : null
   const inputRef = useRef<HTMLInputElement>(null)
   const [editValue, setEditValue] = useState(session.name)
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const commandLabel = formatCommandLabel(session)
+  const directoryLeaf = getPathLeaf(session.projectPath)
+  const needsInput = session.status === 'permission'
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -233,45 +217,40 @@ function SessionRow({
     >
       <div className={`status-bar ${statusBarClass[session.status]}`} />
 
-      <div className="flex items-start justify-between gap-2 pl-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            {isEditing ? (
-              <input
-                ref={inputRef}
-                type="text"
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onBlur={handleSubmit}
-                onKeyDown={handleKeyDown}
-                onClick={(e) => e.stopPropagation()}
-                className="w-full rounded border border-border bg-surface px-1.5 py-0.5 text-sm font-medium text-primary outline-none focus:border-accent"
-              />
-            ) : (
-              <span className="truncate text-sm font-medium text-primary">
-                {session.name}
-              </span>
-            )}
-          </div>
-          {commandLabel && (
-            <div className="mt-0.5">
-              <span className="rounded bg-surface px-1.5 py-0.5 font-mono text-[10px] text-muted">
-                {commandLabel}
-              </span>
-            </div>
-          )}
-          <div className="mt-0.5 flex items-center gap-2 text-xs">
-            <span className={statusTextClass[session.status]}>
-              {statusLabel[session.status]}
+      <div className="flex flex-col gap-0.5 pl-2">
+        {/* Line 1: Icon + Name + Time/Hand */}
+        <div className="flex items-center gap-2">
+          <AgentIcon session={session} className="h-3.5 w-3.5 shrink-0 text-muted" />
+          {isEditing ? (
+            <input
+              ref={inputRef}
+              type="text"
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={handleSubmit}
+              onKeyDown={handleKeyDown}
+              onClick={(e) => e.stopPropagation()}
+              className="min-w-0 flex-1 rounded border border-border bg-surface px-1.5 py-0.5 text-sm font-medium text-primary outline-none focus:border-accent"
+            />
+          ) : (
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
+              {session.name}
             </span>
-            <span className="text-muted">{lastActivity}</span>
-          </div>
+          )}
+          {needsInput ? (
+            <HandIcon className="h-4 w-4 shrink-0 text-approval" aria-label="Needs input" />
+          ) : (
+            <span className="shrink-0 text-xs tabular-nums text-muted">{lastActivity}</span>
+          )}
         </div>
 
-        {/* Position indicator */}
-        {shortcutLabel && (
-          <span className="hidden text-xs tabular-nums text-muted/50 md:block">
-            {shortcutLabel}
+        {/* Line 2: Directory */}
+        {directoryLeaf && (
+          <span
+            className="truncate pl-[22px] text-xs text-muted"
+            title={session.projectPath}
+          >
+            {directoryLeaf}
           </span>
         )}
       </div>
