@@ -2,8 +2,34 @@ import { useEffect, useRef, useCallback } from 'react'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { WebglAddon } from 'xterm-addon-webgl'
-import { ClipboardAddon } from '@xterm/addon-clipboard'
+import { ClipboardAddon, type ClipboardSelectionType, type IClipboardProvider } from '@xterm/addon-clipboard'
 import type { ServerMessage } from '@shared/types'
+
+/**
+ * Custom clipboard provider that prevents empty writes (matching Ghostty's behavior).
+ * OSC 52 with empty base64 data clears clipboard in reference xterm, but this can
+ * accidentally wipe images or other non-text content the user has copied.
+ */
+class SafeClipboardProvider implements IClipboardProvider {
+  async readText(selection: ClipboardSelectionType): Promise<string> {
+    if (selection !== 'c') return ''
+    try {
+      return await navigator.clipboard.readText()
+    } catch {
+      return ''
+    }
+  }
+
+  async writeText(selection: ClipboardSelectionType, text: string): Promise<void> {
+    // Only write to system clipboard, and only if there's actual content
+    if (selection !== 'c' || !text) return
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      // Clipboard write failed (permissions, etc.)
+    }
+  }
+}
 import type { ITheme } from 'xterm'
 import { isIOSDevice } from '../utils/device'
 
@@ -131,7 +157,7 @@ export function useTerminal({
 
     const fitAddon = new FitAddon()
     terminal.loadAddon(fitAddon)
-    terminal.loadAddon(new ClipboardAddon())
+    terminal.loadAddon(new ClipboardAddon(undefined, new SafeClipboardProvider()))
 
     if (useWebGLRef.current) {
       try {
