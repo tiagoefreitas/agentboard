@@ -44,7 +44,11 @@ export default function App() {
   const defaultProjectDir = useSettingsStore(
     (state) => state.defaultProjectDir
   )
-  const defaultCommand = useSettingsStore((state) => state.defaultCommand)
+  const commandPresets = useSettingsStore((state) => state.commandPresets)
+  const defaultPresetId = useSettingsStore((state) => state.defaultPresetId)
+  const updatePresetModifiers = useSettingsStore(
+    (state) => state.updatePresetModifiers
+  )
   const lastProjectPath = useSettingsStore((state) => state.lastProjectPath)
   const setLastProjectPath = useSettingsStore(
     (state) => state.setLastProjectPath
@@ -241,7 +245,9 @@ export default function App() {
         onClose={() => setIsModalOpen(false)}
         onCreate={handleCreateSession}
         defaultProjectDir={defaultProjectDir}
-        defaultCommand={defaultCommand}
+        commandPresets={commandPresets}
+        defaultPresetId={defaultPresetId}
+        onUpdateModifiers={updatePresetModifiers}
         lastProjectPath={lastProjectPath}
         activeProjectPath={selectedSession?.projectPath}
       />
