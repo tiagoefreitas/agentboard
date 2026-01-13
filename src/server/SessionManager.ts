@@ -573,7 +573,11 @@ function capturePaneWithDimensions(tmuxWindow: string): PaneCapture | null {
       return null
     }
     // Only compare last 30 lines to avoid scrollback noise
+    // First strip trailing empty lines so the "last 30" are actual content
     const lines = result.stdout.toString().split('\n')
+    while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+      lines.pop()
+    }
     const content = lines.slice(-30).join('\n')
     return { content, width, height }
   } catch {
