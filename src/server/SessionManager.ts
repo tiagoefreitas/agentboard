@@ -32,11 +32,6 @@ interface PaneCache {
   height: number
 }
 const paneContentCache = new Map<string, PaneCache>()
-const statusDebugEnv = process.env.STATUS_DEBUG?.trim().toLowerCase()
-const STATUS_DEBUG =
-  statusDebugEnv === undefined || statusDebugEnv === ''
-    ? true
-    : statusDebugEnv !== '0' && statusDebugEnv !== 'false'
 const WINDOW_LIST_FORMAT =
   '#{window_id}\t#{window_name}\t#{pane_current_path}\t#{window_activity}\t#{window_creation_time}\t#{pane_start_command}'
 const WINDOW_LIST_FORMAT_FALLBACK =
@@ -437,47 +432,9 @@ function inferStatus(
         newNormalized
       )
       contentChanged = resizeStats.changed
-      logStatusDebug({
-        tmuxWindow,
-        reason: 'resize',
-        oldWidth: cached.width,
-        oldHeight: cached.height,
-        newWidth: width,
-        newHeight: height,
-        normalizedChanged: contentChanged,
-        overlapRatioMin: resizeStats.ratioMin,
-        overlapRatioMax: resizeStats.ratioMax,
-        overlapTokens: resizeStats.overlap,
-        oldTokenCount: resizeStats.leftSize,
-        newTokenCount: resizeStats.rightSize,
-        oldNormalized: tailContent(oldNormalized),
-        newNormalized: tailContent(newNormalized),
-        cachedLength: cached.content.length,
-        newLength: content.length,
-      })
     } else {
       contentChanged = cached.content !== content
-      if (contentChanged) {
-        logStatusDebug({
-          tmuxWindow,
-          reason: 'content-change',
-          width,
-          height,
-          cachedLength: cached.content.length,
-          newLength: content.length,
-          oldTail: tailContent(cached.content),
-          newTail: tailContent(content),
-        })
-      }
     }
-  } else {
-    logStatusDebug({
-      tmuxWindow,
-      reason: 'initial',
-      width,
-      height,
-      contentLength: content.length,
-    })
   }
   const lastChanged = contentChanged ? now() : (cached?.lastChanged ?? now())
 
@@ -561,25 +518,6 @@ function isMeaningfulResizeChange(oldNormalized: string, newNormalized: string) 
   }
   const changed = stats.ratioMin < 0.9
   return { changed, ...stats }
-}
-
-function tailContent(content: string, limit = 200): string {
-  if (content.length <= limit) {
-    return content
-  }
-  return `...${content.slice(-limit)}`
-}
-
-function logStatusDebug(payload: Record<string, unknown>): void {
-  if (!STATUS_DEBUG) {
-    return
-  }
-  console.log(
-    JSON.stringify({
-      event: 'status_debug',
-      ...payload,
-    })
-  )
 }
 
 function capturePaneWithDimensions(tmuxWindow: string): PaneCapture | null {
