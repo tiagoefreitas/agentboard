@@ -5,6 +5,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react'
+import type { TouchEvent as ReactTouchEvent } from 'react'
 import type { Session } from '@shared/types'
 import { CornerDownLeftIcon } from '@untitledui-icons/react/line'
 import DPad from './DPad'
@@ -108,12 +109,38 @@ export default function TerminalControls({
   const [ctrlActive, setCtrlActive] = useState(false)
   const pasteInputRef = useRef<HTMLInputElement>(null)
   const pasteZoneRef = useRef<HTMLDivElement>(null)
+  const lastTouchTimeRef = useRef(0)
+  const controlsRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (showPasteInput && pasteInputRef.current) {
       pasteInputRef.current.focus()
     }
   }, [showPasteInput])
+
+  useEffect(() => {
+    const controls = controlsRef.current
+    if (!controls) return
+
+    const handleTouchStartCapture = (event: TouchEvent) => {
+      if (disabled) return
+      if (!controls.contains(event.target as Node)) return
+      if (isKeyboardVisible?.()) {
+        event.preventDefault()
+      }
+    }
+
+    controls.addEventListener('touchstart', handleTouchStartCapture, {
+      passive: false,
+      capture: true,
+    })
+
+    return () => {
+      controls.removeEventListener('touchstart', handleTouchStartCapture, {
+        capture: true,
+      })
+    }
+  }, [disabled, isKeyboardVisible])
 
   // Handle paste events in the modal (for images via native paste gesture)
   useEffect(() => {
@@ -299,8 +326,27 @@ export default function TerminalControls({
   // Only show session row if there are multiple sessions and not hidden
   const showSessionRow = sessions.length > 1 && !hideSessionSwitcher
 
+  const handleTouchAction = (handler: () => void) => (e: ReactTouchEvent) => {
+    if (disabled) return
+    e.preventDefault()
+    e.stopPropagation()
+    lastTouchTimeRef.current = Date.now()
+    handler()
+  }
+
+  const handleClickAction = (handler: () => void) => () => {
+    if (disabled) return
+    if (Date.now() - lastTouchTimeRef.current < 700) {
+      return
+    }
+    handler()
+  }
+
   return (
-    <div className="terminal-controls flex flex-col gap-1.5 px-2 py-2.5 bg-elevated border-t border-border md:hidden">
+    <div
+      ref={controlsRef}
+      className="terminal-controls flex flex-col gap-1.5 px-2 py-2.5 bg-elevated border-t border-border md:hidden"
+    >
       {/* Session switcher row */}
       {showSessionRow && (
         <div className="relative -mx-2">
@@ -357,8 +403,8 @@ export default function TerminalControls({
             ${disabled ? 'opacity-50' : ''}
           `}
           onMouseDown={(e) => e.preventDefault()}
-          onTouchStart={(e) => e.preventDefault()}
-          onClick={handleCtrlToggle}
+          onTouchStart={handleTouchAction(handleCtrlToggle)}
+          onClick={handleClickAction(handleCtrlToggle)}
           disabled={disabled}
         >
           ctrl
@@ -382,8 +428,8 @@ export default function TerminalControls({
               ${disabled ? 'opacity-50' : ''}
             `}
             onMouseDown={(e) => e.preventDefault()}
-            onTouchStart={(e) => e.preventDefault()}
-            onClick={() => handlePress(control.key)}
+            onTouchStart={handleTouchAction(() => handlePress(control.key))}
+            onClick={handleClickAction(() => handlePress(control.key))}
             disabled={disabled}
           >
             {control.label}
@@ -426,8 +472,8 @@ export default function TerminalControls({
               ${disabled ? 'opacity-50' : ''}
             `}
             onMouseDown={(e) => e.preventDefault()}
-            onTouchStart={(e) => e.preventDefault()}
-            onClick={() => handlePress(control.key)}
+            onTouchStart={handleTouchAction(() => handlePress(control.key))}
+            onClick={handleClickAction(() => handlePress(control.key))}
             disabled={disabled}
           >
             {control.label}
@@ -450,8 +496,8 @@ export default function TerminalControls({
             ${disabled ? 'opacity-50' : ''}
           `}
           onMouseDown={(e) => e.preventDefault()}
-          onTouchStart={(e) => e.preventDefault()}
-          onClick={handlePasteButtonClick}
+          onTouchStart={handleTouchAction(() => { void handlePasteButtonClick() })}
+          onClick={handleClickAction(() => { void handlePasteButtonClick() })}
           disabled={disabled}
         >
           {PasteIcon}
@@ -473,8 +519,8 @@ export default function TerminalControls({
             ${disabled ? 'opacity-50' : ''}
           `}
           onMouseDown={(e) => e.preventDefault()}
-          onTouchStart={(e) => e.preventDefault()}
-          onClick={handleKeyboardPress}
+          onTouchStart={handleTouchAction(handleKeyboardPress)}
+          onClick={handleClickAction(handleKeyboardPress)}
           disabled={disabled}
         >
           {KeyboardIcon}

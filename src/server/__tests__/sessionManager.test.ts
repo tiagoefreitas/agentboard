@@ -257,6 +257,62 @@ describe('SessionManager', () => {
     }
   })
 
+  test('listWindows falls back when tmux format keys are missing', () => {
+    const sessionName = 'agentboard-format-fallback'
+    const calls: string[][] = []
+
+    const runTmux = (args: string[]) => {
+      calls.push(args)
+      const command = args[0]
+
+      if (command === 'has-session') {
+        return ''
+      }
+
+      if (command === 'list-sessions') {
+        return sessionName
+      }
+
+      if (command === 'list-windows') {
+        const format = args[4] ?? ''
+        if (
+          format.includes('window_creation_time') ||
+          format.includes('pane_start_command')
+        ) {
+          throw new Error('unknown format: window_creation_time')
+        }
+        return '1\talpha\t/tmp/alpha\t1700000000\t1700000000\tclaude'
+      }
+
+      throw new Error(`Unhandled tmux command: ${args.join(' ')}`)
+    }
+
+    const manager = new SessionManager(sessionName, {
+      runTmux,
+      capturePaneContent: () => null,
+      now: () => 1700000000000,
+    })
+
+    const sessions = manager.listWindows()
+
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0]?.command).toBe('claude')
+    expect(
+      calls.some(
+        (call) =>
+          call[0] === 'list-windows' &&
+          String(call[4]).includes('window_creation_time')
+      )
+    ).toBe(true)
+    expect(
+      calls.some(
+        (call) =>
+          call[0] === 'list-windows' &&
+          String(call[4]).includes('pane_current_command')
+      )
+    ).toBe(true)
+  })
+
   test('createWindow normalizes name and picks next index', () => {
     const sessionName = 'agentboard'
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentboard-'))

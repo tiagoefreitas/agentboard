@@ -245,6 +245,7 @@ body {
   top: 50% !important;
   transform: translate(-50%, -50%);
   opacity: 0;
+  caret-color: transparent;
   width: 1px;
   height: 1px;
   pointer-events: none;

@@ -94,6 +94,8 @@ export default function Terminal({
   const [isRenaming, setIsRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState('')
   const isEdgeSwipingRef = useRef(false)
+  const lastSelectionInsideRef = useRef(false)
+  const clearIOSSelectionRef = useRef<(() => void) | null>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
   const endSessionButtonRef = useRef<HTMLButtonElement>(null)
@@ -264,7 +266,7 @@ export default function Terminal({
   }
 
   useEffect(() => {
-    if (!isiOS || !session || !isMobileLayout) {
+    if (!isiOS || !session) {
       setIsSelectingText(false)
       return
     }
@@ -280,31 +282,63 @@ export default function Terminal({
       return (!!anchor && a11yTree.contains(anchor)) || (!!focus && a11yTree.contains(focus))
     }
 
-    const onSelectionChange = () => {
-      const sel = window.getSelection()
-      if (!sel || sel.rangeCount === 0) {
-        // Only update if currently true to avoid unnecessary re-renders
-        setIsSelectingText((prev) => prev ? false : prev)
-        return
-      }
-      const newValue = isSelectionInside(sel) && !sel.isCollapsed
-      // Only update if value changed
-      setIsSelectingText((prev) => prev !== newValue ? newValue : prev)
+    const forceA11yRepaint = () => {
+      const a11yRoot = container.querySelector('.xterm-accessibility') as HTMLElement | null
+      const a11yTree = container.querySelector('.xterm-accessibility-tree') as HTMLElement | null
+      if (!a11yRoot || !a11yTree) return
+
+      a11yRoot.style.setProperty('opacity', '0')
+      a11yTree.style.setProperty('opacity', '0')
+      a11yRoot.style.setProperty('-webkit-user-select', 'none')
+      a11yRoot.style.setProperty('user-select', 'none')
+      a11yTree.style.setProperty('-webkit-user-select', 'none')
+      a11yTree.style.setProperty('user-select', 'none')
+      void a11yRoot.offsetHeight // Force reflow
+
+      requestAnimationFrame(() => {
+        a11yRoot.style.removeProperty('opacity')
+        a11yTree.style.removeProperty('opacity')
+        a11yRoot.style.removeProperty('-webkit-user-select')
+        a11yRoot.style.removeProperty('user-select')
+        a11yTree.style.removeProperty('-webkit-user-select')
+        a11yTree.style.removeProperty('user-select')
+      })
     }
 
-    // Hard-clear iOS selection by toggling -webkit-user-select to force repaint
+    // Hard-clear iOS selection by removing ranges and forcing a11y repaint
     const clearIOSSelection = () => {
+      lastSelectionInsideRef.current = false
       const sel = window.getSelection()
       try { sel?.removeAllRanges() } catch {}
-
-      // Force WebKit repaint of selection painting on the a11y tree
-      const a11yTree = container.querySelector('.xterm-accessibility-tree') as HTMLElement | null
-      if (a11yTree) {
-        a11yTree.style.setProperty('-webkit-user-select', 'none')
-        void a11yTree.offsetHeight // Force reflow
-        a11yTree.style.setProperty('-webkit-user-select', 'text')
-      }
+      terminalRef.current?.clearSelection()
+      forceA11yRepaint()
       setIsSelectingText(false)
+    }
+
+    clearIOSSelectionRef.current = clearIOSSelection
+
+    const onSelectionChange = () => {
+      const sel = window.getSelection()
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+        if (lastSelectionInsideRef.current) {
+          clearIOSSelection()
+        } else {
+          // Only update if currently true to avoid unnecessary re-renders
+          setIsSelectingText((prev) => prev ? false : prev)
+        }
+        return
+      }
+
+      const selectionInside = isSelectionInside(sel)
+      if (!selectionInside && lastSelectionInsideRef.current) {
+        clearIOSSelection()
+        return
+      }
+
+      lastSelectionInsideRef.current = selectionInside
+      const newValue = selectionInside
+      // Only update if value changed
+      setIsSelectingText((prev) => prev !== newValue ? newValue : prev)
     }
 
     const onCopy = () => {
@@ -355,9 +389,11 @@ export default function Terminal({
       document.removeEventListener('selectionchange', onSelectionChange)
       document.removeEventListener('copy', onCopy)
       document.removeEventListener('touchend', onTouchEnd)
+      clearIOSSelectionRef.current = null
+      lastSelectionInsideRef.current = false
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- use session?.id to avoid re-running on session data changes
-  }, [containerRef, isiOS, isMobileLayout, session?.id])
+  }, [containerRef, isiOS, session?.id])
 
   useEffect(() => {
     if (!isiOS) return
@@ -566,8 +602,16 @@ export default function Terminal({
       return (!!anchor && a11yTree.contains(anchor)) || (!!focus && a11yTree.contains(focus))
     }
 
+    const maybeClearStaleSelection = () => {
+      if (!isiOS || !lastSelectionInsideRef.current) return
+      if (!hasActiveSelection()) {
+        clearIOSSelectionRef.current?.()
+      }
+    }
+
     const handleTouchStart = (e: TouchEvent) => {
       stopMomentum()
+      maybeClearStaleSelection()
 
       // Skip if edge swiping (opening drawer) or drawer is open
       if (isEdgeSwipingRef.current || isDrawerOpen) {
@@ -598,6 +642,7 @@ export default function Terminal({
 
     const handleTouchMove = (e: TouchEvent) => {
       if (e.touches.length !== 1 || lastTouchY === null) return
+      maybeClearStaleSelection()
 
       // Skip if edge swiping (opening drawer) or drawer is open
       if (isEdgeSwipingRef.current || isDrawerOpen) {
@@ -654,10 +699,15 @@ export default function Terminal({
         return
       }
 
+      const activeSelection = hasActiveSelection()
+      if (isSelectingTextRef.current && !activeSelection) {
+        clearIOSSelectionRef.current?.()
+      }
+
       // If selecting text, let iOS handle the tap naturally to dismiss selection
       // Don't preventDefault - that breaks iOS selection dismissal
       // We'll swallow the synthetic mouse event instead to protect tmux
-      if (isSelectingTextRef.current || hasActiveSelection()) {
+      if (isSelectingTextRef.current || activeSelection) {
         if (inTmuxCopyModeRef.current) {
           swallowNextMouseRef.current = true
         }
@@ -780,6 +830,37 @@ export default function Terminal({
     const textarea = container.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null
     return textarea ? document.activeElement === textarea : false
   }, [containerRef])
+
+  useEffect(() => {
+    if (!isiOS) return
+    const container = containerRef.current
+    if (!container) return
+
+    const a11yRoot = container.querySelector('.xterm-accessibility') as HTMLElement | null
+    const a11yTree = container.querySelector('.xterm-accessibility-tree') as HTMLElement | null
+    if (!a11yRoot || !a11yTree) return
+
+    const updatePointerEvents = () => {
+      const textarea = container.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null
+      const keyboardVisible = textarea ? document.activeElement === textarea : false
+      if (keyboardVisible && !isSelectingTextRef.current) {
+        a11yRoot.style.pointerEvents = 'none'
+        a11yTree.style.pointerEvents = 'none'
+      } else {
+        a11yRoot.style.removeProperty('pointer-events')
+        a11yTree.style.removeProperty('pointer-events')
+      }
+    }
+
+    updatePointerEvents()
+
+    document.addEventListener('focusin', updatePointerEvents)
+    document.addEventListener('focusout', updatePointerEvents)
+    return () => {
+      document.removeEventListener('focusin', updatePointerEvents)
+      document.removeEventListener('focusout', updatePointerEvents)
+    }
+  }, [containerRef, isiOS, isSelectingText])
 
   return (
     <section

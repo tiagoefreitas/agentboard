@@ -23,6 +23,10 @@ interface PaneCache {
   lastChanged: number
 }
 const paneContentCache = new Map<string, PaneCache>()
+const WINDOW_LIST_FORMAT =
+  '#{window_id}\t#{window_name}\t#{pane_current_path}\t#{window_activity}\t#{window_creation_time}\t#{pane_start_command}'
+const WINDOW_LIST_FORMAT_FALLBACK =
+  '#{window_id}\t#{window_name}\t#{pane_current_path}\t#{window_activity}\t#{window_activity}\t#{pane_current_command}'
 
 export class SessionManager {
   private sessionName: string
@@ -209,13 +213,7 @@ export class SessionManager {
     sessionName: string,
     source: Session['source']
   ): Session[] {
-    const output = this.runTmux([
-      'list-windows',
-      '-t',
-      sessionName,
-      '-F',
-      '#{window_id}\t#{window_name}\t#{pane_current_path}\t#{window_activity}\t#{window_creation_time}\t#{pane_start_command}',
-    ])
+    const output = this.listWindowOutput(sessionName)
 
     return output
       .split('\n')
@@ -245,6 +243,20 @@ export class SessionManager {
           command: window.command || undefined,
         }
       })
+  }
+
+  private listWindowOutput(sessionName: string): string {
+    const args = ['list-windows', '-t', sessionName, '-F']
+
+    try {
+      return this.runTmux([...args, WINDOW_LIST_FORMAT])
+    } catch (error) {
+      if (!isTmuxFormatError(error)) {
+        throw error
+      }
+    }
+
+    return this.runTmux([...args, WINDOW_LIST_FORMAT_FALLBACK])
   }
 
   private findAvailableName(base: string, existing: Set<string>): string {
@@ -363,6 +375,15 @@ function runTmux(args: string[]): string {
   }
 
   return result.stdout.toString()
+}
+
+function isTmuxFormatError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  const message = error.message.toLowerCase()
+  return message.includes('unknown format') || message.includes('invalid format')
 }
 
 interface StatusResult {
