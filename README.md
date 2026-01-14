@@ -59,6 +59,7 @@ DISCOVER_PREFIXES=work,external
 PRUNE_WS_SESSIONS=true
 TERMINAL_MODE=pty
 TERMINAL_MONITOR_TARGETS=true
+VITE_ALLOWED_HOSTS=nuc,myserver
 ```
 
 `HOSTNAME` controls which interfaces the server binds to (default `0.0.0.0` for network access; use `127.0.0.1` for local-only).
@@ -66,6 +67,7 @@ TERMINAL_MONITOR_TARGETS=true
 `PRUNE_WS_SESSIONS` removes orphaned `agentboard-ws-*` tmux sessions on startup (set to `false` to disable).
 `TERMINAL_MODE` selects terminal I/O strategy: `pty` (default, grouped session) or `pipe-pane` (PTY-less, works in daemon/systemd/docker without `-t`).
 `TERMINAL_MONITOR_TARGETS` (pipe-pane only) polls tmux to detect closed targets (set to `false` to disable).
+`VITE_ALLOWED_HOSTS` allows access to the Vite dev server from other hostnames. Useful with Tailscale MagicDNS - add your machine name (e.g., `nuc`) to access the dev server at `http://nuc:5173` from other devices on your tailnet.
 
 ## Troubleshooting
 
