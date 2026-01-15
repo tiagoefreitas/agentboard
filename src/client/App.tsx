@@ -41,6 +41,7 @@ export default function App() {
     (state) => state.connectionStatus
   )
   const connectionError = useSessionStore((state) => state.connectionError)
+  const clearExitingSession = useSessionStore((state) => state.clearExitingSession)
 
   const theme = useThemeStore((state) => state.theme)
   const defaultProjectDir = useSettingsStore(
@@ -129,12 +130,19 @@ export default function App() {
         setServerError(message.message)
         window.setTimeout(() => setServerError(null), 6000)
       }
+      if (message.type === 'kill-failed') {
+        // Clear from exiting state since kill failed - session remains active
+        clearExitingSession(message.sessionId)
+        setServerError(message.message)
+        window.setTimeout(() => setServerError(null), 6000)
+      }
     })
 
     return () => { unsubscribe() }
   }, [
     selectedSessionId,
     addRecentPath,
+    clearExitingSession,
     sendMessage,
     setSelectedSessionId,
     setSessions,

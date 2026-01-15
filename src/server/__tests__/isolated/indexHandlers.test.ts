@@ -466,9 +466,9 @@ describe('server message handlers', () => {
       })
     )
 
-    expect(sent[0]).toEqual({ type: 'error', message: 'Session not found' })
+    expect(sent[0]).toEqual({ type: 'kill-failed', sessionId: 'missing', message: 'Session not found' })
     // External sessions cannot be killed by default (requires ALLOW_KILL_EXTERNAL=true)
-    expect(sent[1]).toEqual({ type: 'error', message: 'Cannot kill external sessions' })
+    expect(sent[1]).toEqual({ type: 'kill-failed', sessionId: 'external', message: 'Cannot kill external sessions' })
     expect(killed).toEqual([])
     expect(sent[2]).toEqual({ type: 'error', message: 'Session not found' })
   })
@@ -531,7 +531,7 @@ describe('server message handlers', () => {
       })
     )
 
-    expect(sent[sent.length - 2]).toEqual({ type: 'error', message: 'boom' })
+    expect(sent[sent.length - 2]).toEqual({ type: 'kill-failed', sessionId: baseSession.id, message: 'boom' })
     expect(sent[sent.length - 1]).toEqual({ type: 'error', message: 'nope' })
   })
 

@@ -823,11 +823,11 @@ function handleCancelCopyMode(sessionId: string) {
 function handleKill(sessionId: string, ws: ServerWebSocket<WSData>) {
   const session = registry.get(sessionId)
   if (!session) {
-    send(ws, { type: 'error', message: 'Session not found' })
+    send(ws, { type: 'kill-failed', sessionId, message: 'Session not found' })
     return
   }
   if (session.source !== 'managed' && !config.allowKillExternal) {
-    send(ws, { type: 'error', message: 'Cannot kill external sessions' })
+    send(ws, { type: 'kill-failed', sessionId, message: 'Cannot kill external sessions' })
     return
   }
 
@@ -858,7 +858,8 @@ function handleKill(sessionId: string, ws: ServerWebSocket<WSData>) {
     refreshSessions()
   } catch (error) {
     send(ws, {
-      type: 'error',
+      type: 'kill-failed',
+      sessionId,
       message:
         error instanceof Error ? error.message : 'Unable to kill session',
     })
