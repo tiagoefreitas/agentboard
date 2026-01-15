@@ -20,7 +20,7 @@ import { HandIcon } from '@untitledui-icons/react/line'
 import ChevronDownIcon from '@untitledui-icons/react/line/esm/ChevronDownIcon'
 import ChevronRightIcon from '@untitledui-icons/react/line/esm/ChevronRightIcon'
 import type { AgentSession, Session } from '@shared/types'
-import { getSessionOrderKey, sortSessions } from '../utils/sessions'
+import { getSessionOrderKey, getUniqueProjects, sortSessions } from '../utils/sessions'
 import { formatRelativeTime } from '../utils/time'
 import { getPathLeaf } from '../utils/sessionLabel'
 import { getSessionIdPrefix } from '../utils/sessionId'
@@ -29,6 +29,7 @@ import { useSessionStore } from '../stores/sessionStore'
 import { getEffectiveModifier, getModifierDisplay } from '../utils/device'
 import AgentIcon from './AgentIcon'
 import InactiveSessionItem from './InactiveSessionItem'
+import ProjectFilterDropdown from './ProjectFilterDropdown'
 import SessionPreviewModal from './SessionPreviewModal'
 
 interface SessionListProps {
@@ -189,6 +190,8 @@ export default function SessionList({
   const showSessionIdPrefix = useSettingsStore(
     (state) => state.showSessionIdPrefix
   )
+  const projectFilters = useSettingsStore((state) => state.projectFilters)
+  const setProjectFilters = useSettingsStore((state) => state.setProjectFilters)
 
   // Get exiting sessions from store (sessions being animated out)
   const exitingSessions = useSessionStore((state) => state.exitingSessions)
@@ -246,7 +249,7 @@ export default function SessionList({
   }, [])
 
   // Filter inactive sessions to exclude any still exiting from active list
-  const filteredInactiveSessions = useMemo(() => {
+  const inactiveSessionsWithoutExiting = useMemo(() => {
     if (exitingSessions.size === 0) return inactiveSessions
     // Get agent session IDs of exiting sessions
     const exitingAgentIds = new Set(
@@ -282,6 +285,41 @@ export default function SessionList({
     direction: sessionSortDirection,
     manualOrder: manualSessionOrder,
   })
+
+  const uniqueProjects = useMemo(
+    () => getUniqueProjects(sessions, inactiveSessions),
+    [sessions, inactiveSessions]
+  )
+
+  const filteredSessions = useMemo(() => {
+    if (projectFilters.length === 0) return sortedSessions
+    return sortedSessions.filter((session) => projectFilters.includes(session.projectPath))
+  }, [sortedSessions, projectFilters])
+
+  const filteredInactiveSessions = useMemo(() => {
+    if (projectFilters.length === 0) return inactiveSessionsWithoutExiting
+    return inactiveSessionsWithoutExiting.filter(
+      (session) => projectFilters.includes(session.projectPath)
+    )
+  }, [inactiveSessionsWithoutExiting, projectFilters])
+
+  const hiddenPermissionCount = useMemo(() => {
+    if (projectFilters.length === 0) return 0
+    const filterSet = new Set(projectFilters)
+    return sessions.filter(
+      (session) =>
+        !filterSet.has(session.projectPath) && session.status === 'permission'
+    ).length
+  }, [sessions, projectFilters])
+
+  useEffect(() => {
+    if (projectFilters.length === 0) return
+    const validProjects = new Set(uniqueProjects)
+    const nextFilters = projectFilters.filter((project) => validProjects.has(project))
+    if (nextFilters.length !== projectFilters.length) {
+      setProjectFilters(nextFilters)
+    }
+  }, [projectFilters, uniqueProjects, setProjectFilters])
 
   // Drag-and-drop setup
   const sensors = useSensors(
@@ -319,17 +357,26 @@ export default function SessionList({
         return
       }
 
-      const oldIndex = sortedSessions.findIndex((s) => s.id === active.id)
-      const newIndex = sortedSessions.findIndex((s) => s.id === over.id)
+      const oldIndex = filteredSessions.findIndex((s) => s.id === active.id)
+      const newIndex = filteredSessions.findIndex((s) => s.id === over.id)
       if (oldIndex === -1 || newIndex === -1) {
         setTimeout(() => setLayoutAnimationsDisabled(false), 100)
         return
       }
 
-      // Create new order array
-      const newOrder = sortedSessions.map((s) => getSessionOrderKey(s))
-      const [removed] = newOrder.splice(oldIndex, 1)
-      newOrder.splice(newIndex, 0, removed)
+      const reorderedVisible = filteredSessions.map((s) => getSessionOrderKey(s))
+      const [removed] = reorderedVisible.splice(oldIndex, 1)
+      reorderedVisible.splice(newIndex, 0, removed)
+
+      const fullOrder = sortedSessions.map((s) => getSessionOrderKey(s))
+      const visibleSet = new Set(reorderedVisible)
+      let visibleIndex = 0
+      const newOrder = fullOrder.map((id) => {
+        if (!visibleSet.has(id)) return id
+        const nextId = reorderedVisible[visibleIndex]
+        visibleIndex += 1
+        return nextId
+      })
 
       // Switch to manual mode and update order
       if (sessionSortMode !== 'manual') {
@@ -339,7 +386,13 @@ export default function SessionList({
       // Re-enable layout animations after state settles
       setTimeout(() => setLayoutAnimationsDisabled(false), 100)
     },
-    [sortedSessions, sessionSortMode, setSessionSortMode, setManualSessionOrder]
+    [
+      filteredSessions,
+      sortedSessions,
+      sessionSortMode,
+      setSessionSortMode,
+      setManualSessionOrder,
+    ]
   )
 
   const handleDragCancel = useCallback(() => {
@@ -350,7 +403,7 @@ export default function SessionList({
 
   useEffect(() => {
     if (!activeId && !overId) return
-    const currentIds = new Set(sessions.map((s) => s.id))
+    const currentIds = new Set(filteredSessions.map((s) => s.id))
     let shouldReset = false
     if (activeId && !currentIds.has(activeId)) {
       setActiveId(null)
@@ -363,7 +416,7 @@ export default function SessionList({
     if (shouldReset) {
       setLayoutAnimationsDisabled(false)
     }
-  }, [sessions, activeId, overId])
+  }, [filteredSessions, activeId, overId])
 
   const handleRename = (sessionId: string, newName: string) => {
     onRename(sessionId, newName)
@@ -376,14 +429,22 @@ export default function SessionList({
         <span className="text-xs font-medium uppercase tracking-wider text-muted">
           Sessions
         </span>
-        <motion.span
-          className="text-xs text-muted"
-          animate={activeCounterBump && !prefersReducedMotion ? { scale: [1, 1.3, 1] } : {}}
-          transition={{ duration: 0.3 }}
-          onAnimationComplete={() => setActiveCounterBump(false)}
-        >
-            {sessions.length}
-        </motion.span>
+        <div className="flex items-center gap-2">
+          <ProjectFilterDropdown
+            projects={uniqueProjects}
+            selectedProjects={projectFilters}
+            onSelect={setProjectFilters}
+            hasHiddenPermissions={hiddenPermissionCount > 0}
+          />
+          <motion.span
+            className="text-xs text-muted"
+            animate={activeCounterBump && !prefersReducedMotion ? { scale: [1, 1.3, 1] } : {}}
+            transition={{ duration: 0.3 }}
+            onAnimationComplete={() => setActiveCounterBump(false)}
+          >
+              {filteredSessions.length}
+          </motion.span>
+        </div>
       </div>
 
       {error && (
@@ -402,7 +463,7 @@ export default function SessionList({
               />
             ))}
           </div>
-        ) : sortedSessions.length === 0 ? (
+        ) : filteredSessions.length === 0 ? (
           <div className="px-3 py-6 text-center text-xs text-muted">
             No sessions
           </div>
@@ -417,17 +478,19 @@ export default function SessionList({
           >
             {/* Exclude exiting sessions from SortableContext to prevent useSortable interference */}
             <SortableContext
-              items={sortedSessions.filter((s) => !exitingIds.has(s.id)).map((s) => s.id)}
+              items={filteredSessions.filter((s) => !exitingIds.has(s.id)).map((s) => s.id)}
               strategy={verticalListSortingStrategy}
             >
               <div>
                 <AnimatePresence initial={false}>
-                  {sortedSessions.map((session, index) => {
+                  {filteredSessions.map((session, index) => {
                     const isNew = newlyActiveIds.has(session.id)
                     const entryDelay = isNew ? ENTRY_DELAY / 1000 : 0
                     const isExiting = exitingIds.has(session.id)
                     // Calculate drop indicator position
-                    const activeIndex = activeId ? sortedSessions.findIndex((s) => s.id === activeId) : -1
+                    const activeIndex = activeId
+                      ? filteredSessions.findIndex((s) => s.id === activeId)
+                      : -1
                     const isOver = overId === session.id && activeId !== session.id
                     const showDropIndicator = isOver ? (activeIndex > index ? 'above' : 'below') : null
                     return (
@@ -457,7 +520,7 @@ export default function SessionList({
           </DndContext>
         )}
 
-        {inactiveSessions.length > 0 && (
+        {filteredInactiveSessions.length > 0 && (
           <div className="border-t border-border">
             <button
               type="button"
@@ -478,7 +541,7 @@ export default function SessionList({
                 transition={{ duration: 0.3 }}
                 onAnimationComplete={() => setInactiveCounterBump(false)}
               >
-                {inactiveSessions.length}
+                {filteredInactiveSessions.length}
               </motion.span>
             </button>
             <AnimatePresence initial={false}>

@@ -49,6 +49,7 @@ beforeEach(() => {
     sessionSortMode: 'created',
     sessionSortDirection: 'desc',
     showSessionIdPrefix: false,
+    projectFilters: [],
   })
 
   useSessionStore.setState({
@@ -66,6 +67,7 @@ afterEach(() => {
     sessionSortMode: 'created',
     sessionSortDirection: 'desc',
     showSessionIdPrefix: false,
+    projectFilters: [],
   })
   useSessionStore.setState({
     exitingSessions: new Map(),

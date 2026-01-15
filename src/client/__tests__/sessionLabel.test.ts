@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { Session } from '@shared/types'
-import { formatCommandLabel, getPathLeaf } from '../utils/sessionLabel'
+import { formatCommandLabel, getDisambiguatedProjectNames, getPathLeaf } from '../utils/sessionLabel'
 
 const baseSession: Session = {
   id: 'test-session',
@@ -72,5 +72,30 @@ describe('getPathLeaf', () => {
     expect(getPathLeaf('   ')).toBeNull()
     expect(getPathLeaf('/')).toBeNull()
     expect(getPathLeaf('\\\\')).toBeNull()
+  })
+})
+
+describe('getDisambiguatedProjectNames', () => {
+  test('uses leaf names when unique', () => {
+    const map = getDisambiguatedProjectNames(['/work/api', '/work/web'])
+    expect(map.get('/work/api')).toBe('api')
+    expect(map.get('/work/web')).toBe('web')
+  })
+
+  test('disambiguates duplicate leaf names', () => {
+    const map = getDisambiguatedProjectNames([
+      '/work/api',
+      '/personal/api',
+      '/work/tools/api',
+    ])
+    expect(map.get('/work/api')).toBe('work/api')
+    expect(map.get('/personal/api')).toBe('personal/api')
+    expect(map.get('/work/tools/api')).toBe('tools/api')
+  })
+
+  test('falls back to full path when still ambiguous', () => {
+    const map = getDisambiguatedProjectNames(['/foo', 'foo'])
+    expect(map.get('/foo')).toBe('/foo')
+    expect(map.get('foo')).toBe('foo')
   })
 })

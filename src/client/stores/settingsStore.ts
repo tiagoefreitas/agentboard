@@ -98,6 +98,8 @@ interface SettingsState {
   setShowSessionIdPrefix: (enabled: boolean) => void
   inactiveSessionsExpanded: boolean
   setInactiveSessionsExpanded: (expanded: boolean) => void
+  projectFilters: string[]
+  setProjectFilters: (filters: string[]) => void
   // Command presets
   commandPresets: CommandPreset[]
   setCommandPresets: (presets: CommandPreset[]) => void
@@ -140,6 +142,8 @@ export const useSettingsStore = create<SettingsState>()(
       setShowSessionIdPrefix: (enabled) => set({ showSessionIdPrefix: enabled }),
       inactiveSessionsExpanded: false,
       setInactiveSessionsExpanded: (expanded) => set({ inactiveSessionsExpanded: expanded }),
+      projectFilters: [],
+      setProjectFilters: (filters) => set({ projectFilters: filters }),
       // Command presets
       commandPresets: DEFAULT_PRESETS,
       setCommandPresets: (presets) => set({ commandPresets: presets }),

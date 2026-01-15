@@ -305,10 +305,20 @@ describe('SessionDrawer', () => {
       card.props.onClick()
     })
 
-    const button = renderer!.root.findByType('button')
+    const buttons = renderer!.root.findAllByType('button')
+    const newSessionButton = buttons.find((button) => {
+      const { children } = button.props
+      if (typeof children === 'string') return children.includes('New Session')
+      if (Array.isArray(children)) {
+        return children.some((child) => typeof child === 'string' && child.includes('New Session'))
+      }
+      return false
+    })
+
+    expect(newSessionButton).toBeTruthy()
 
     act(() => {
-      button.props.onClick()
+      newSessionButton!.props.onClick()
     })
 
     expect(selectCalls).toEqual(['session-1'])

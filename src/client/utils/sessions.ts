@@ -1,4 +1,4 @@
-import type { Session } from '@shared/types'
+import type { AgentSession, Session } from '@shared/types'
 import type {
   SessionSortDirection,
   SessionSortMode,
@@ -65,4 +65,23 @@ export function sortSessions(
     const bTime = Date.parse(b.createdAt)
     return direction === 'desc' ? bTime - aTime : aTime - bTime
   })
+}
+
+export function getUniqueProjects(
+  sessions: Session[],
+  inactiveSessions: AgentSession[]
+): string[] {
+  const paths = new Set<string>()
+
+  for (const session of sessions) {
+    const path = session.projectPath?.trim()
+    if (path) paths.add(path)
+  }
+
+  for (const session of inactiveSessions) {
+    const path = session.projectPath?.trim()
+    if (path) paths.add(path)
+  }
+
+  return Array.from(paths).sort((a, b) => a.localeCompare(b))
 }

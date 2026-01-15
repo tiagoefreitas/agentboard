@@ -60,6 +60,7 @@ beforeEach(() => {
     lineHeight: 1.4,
     shortcutModifier: 'auto',
     showSessionIdPrefix: false,
+    projectFilters: [],
   })
 })
 
@@ -70,6 +71,7 @@ describe('useSettingsStore', () => {
     expect(state.defaultCommand).toBe(DEFAULT_COMMAND)
     expect(state.lastProjectPath).toBeNull()
     expect(state.recentPaths).toEqual([])
+    expect(state.projectFilters).toEqual([])
   })
 
   test('updates default project dir', () => {
