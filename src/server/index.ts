@@ -259,8 +259,9 @@ function hydrateSessionsWithAgentSessions(sessions: Session[]): Session[] {
       agentType: session.agentType ?? agentSession.agentType,
       agentSessionId: agentSession.sessionId,
       agentSessionName: agentSession.displayName,
-      // Use persisted log activity time (survives server restarts)
+      // Use persisted log times (survives server restarts, works when tmux lacks creation time)
       lastActivity: agentSession.lastActivityAt,
+      createdAt: agentSession.createdAt,
     }
   })
 
