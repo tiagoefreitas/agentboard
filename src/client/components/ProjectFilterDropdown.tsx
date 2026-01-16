@@ -38,6 +38,7 @@ export default function ProjectFilterDropdown({
 
   useEffect(() => {
     if (!open || typeof document === 'undefined') return
+    if (!document.addEventListener || !document.removeEventListener) return
     const handlePointer = (event: MouseEvent | TouchEvent) => {
       const target = event.target as Node | null
       if (target && containerRef.current?.contains(target)) return
