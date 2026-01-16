@@ -202,14 +202,8 @@ export default function SessionList({
   const clearExitingSession = useSessionStore((state) => state.clearExitingSession)
   const exitTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
-  // Merge exiting sessions back into the list to maintain position during exit animation
-  const sessionsWithExiting = useMemo(() => {
-    const currentIds = new Set(sessions.map((s) => s.id))
-    const exiting = Array.from(exitingSessions.values()).filter(
-      (s) => !currentIds.has(s.id)
-    )
-    return [...sessions, ...exiting]
-  }, [sessions, exitingSessions])
+  // Track the last known sorted position of each session for exit animation positioning
+  const lastSortedOrderRef = useRef<Map<string, number>>(new Map())
 
   // Track which session IDs are currently exiting (for disabling sortable)
   const exitingIds = useMemo(() => {
@@ -283,12 +277,55 @@ export default function SessionList({
     }
   }, [sessions, inactiveSessions, manualSessionOrder, setManualSessionOrder])
 
-  // Use sessionsWithExiting to maintain position during exit animation
-  const sortedSessions = sortSessions(sessionsWithExiting, {
-    mode: sessionSortMode,
-    direction: sessionSortDirection,
-    manualOrder: manualSessionOrder,
-  })
+  // Compute sorted sessions with exiting sessions at their original positions
+  const sortedSessions = useMemo(() => {
+    // Sort only the active (non-exiting) sessions
+    const sortedActive = sortSessions(sessions, {
+      mode: sessionSortMode,
+      direction: sessionSortDirection,
+      manualOrder: manualSessionOrder,
+    })
+
+    // Update position map for active sessions (captures positions before exit)
+    const activeIds = new Set(sessions.map((s) => s.id))
+    for (const [idx, session] of sortedActive.entries()) {
+      lastSortedOrderRef.current.set(session.id, idx)
+    }
+    // Clean up positions for sessions that no longer exist and aren't exiting
+    for (const id of lastSortedOrderRef.current.keys()) {
+      if (!activeIds.has(id) && !exitingSessions.has(id)) {
+        lastSortedOrderRef.current.delete(id)
+      }
+    }
+
+    // Get exiting sessions that are no longer in the active list
+    const exitingArray = Array.from(exitingSessions.values()).filter(
+      (s) => !activeIds.has(s.id)
+    )
+
+    if (exitingArray.length === 0) {
+      return sortedActive
+    }
+
+    // Insert exiting sessions at their last known positions
+    const result = [...sortedActive]
+    const exitingWithPos = exitingArray
+      .map((s) => ({
+        session: s,
+        lastIndex: lastSortedOrderRef.current.get(s.id) ?? result.length,
+      }))
+      .sort((a, b) => a.lastIndex - b.lastIndex)
+
+    // Insert in order, adjusting indices as we go
+    let offset = 0
+    for (const { session, lastIndex } of exitingWithPos) {
+      const insertAt = Math.min(lastIndex + offset, result.length)
+      result.splice(insertAt, 0, session)
+      offset++
+    }
+
+    return result
+  }, [sessions, exitingSessions, sessionSortMode, sessionSortDirection, manualSessionOrder])
 
   const uniqueProjects = useMemo(
     () => getUniqueProjects(sessions, inactiveSessions),
