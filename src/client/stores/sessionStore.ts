@@ -49,20 +49,13 @@ export const useSessionStore = create<SessionState>()(
         const currentSessions = state.sessions
         const exitingSessions = state.exitingSessions
 
-        // Find sessions that are being removed (exist in current but not in new)
+        // Detect sessions removed by external sources (other tabs, devices, tmux).
+        // Mark them as exiting so SessionList can animate them out gracefully.
+        // Without this, externally-killed sessions vanish instantly causing artifacts.
         const newSessionIds = new Set(sessions.map((s) => s.id))
         const removedSessions = currentSessions.filter(
           (s) => !newSessionIds.has(s.id) && !exitingSessions.has(s.id)
         )
-
-        // Mark removed sessions as exiting for exit animation
-        let nextExitingSessions = exitingSessions
-        if (removedSessions.length > 0) {
-          nextExitingSessions = new Map(exitingSessions)
-          for (const session of removedSessions) {
-            nextExitingSessions.set(session.id, session)
-          }
-        }
 
         let newSelectedId: string | null = selected
         if (
@@ -78,12 +71,26 @@ export const useSessionStore = create<SessionState>()(
           })
           newSelectedId = sorted[0]?.id ?? null
         }
-        set({
-          sessions,
-          hasLoaded: true,
-          selectedSessionId: newSelectedId,
-          exitingSessions: nextExitingSessions,
-        })
+
+        // Only update exitingSessions if there are newly removed sessions
+        if (removedSessions.length > 0) {
+          const nextExitingSessions = new Map(exitingSessions)
+          for (const session of removedSessions) {
+            nextExitingSessions.set(session.id, session)
+          }
+          set({
+            sessions,
+            hasLoaded: true,
+            selectedSessionId: newSelectedId,
+            exitingSessions: nextExitingSessions,
+          })
+        } else {
+          set({
+            sessions,
+            hasLoaded: true,
+            selectedSessionId: newSelectedId,
+          })
+        }
       },
       setAgentSessions: (active, inactive) =>
         set({
