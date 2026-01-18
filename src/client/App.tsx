@@ -65,6 +65,7 @@ export default function App() {
   const shortcutModifier = useSettingsStore((state) => state.shortcutModifier)
   const sidebarWidth = useSettingsStore((state) => state.sidebarWidth)
   const setSidebarWidth = useSettingsStore((state) => state.setSidebarWidth)
+  const projectFilters = useSettingsStore((state) => state.projectFilters)
 
   const { sendMessage, subscribe } = useWebSocket()
 
@@ -230,6 +231,25 @@ export default function App() {
     [sessions, sessionSortMode, sessionSortDirection, manualSessionOrder]
   )
 
+  // Apply project filters to sorted sessions for keyboard navigation
+  const filteredSortedSessions = useMemo(() => {
+    if (projectFilters.length === 0) return sortedSessions
+    return sortedSessions.filter((session) =>
+      projectFilters.includes(session.projectPath)
+    )
+  }, [sortedSessions, projectFilters])
+
+  // Auto-select first visible session when current selection is filtered out
+  useEffect(() => {
+    if (
+      selectedSessionId &&
+      filteredSortedSessions.length > 0 &&
+      !filteredSortedSessions.some((s) => s.id === selectedSessionId)
+    ) {
+      setSelectedSessionId(filteredSortedSessions[0].id)
+    }
+  }, [selectedSessionId, filteredSortedSessions, setSelectedSessionId])
+
   // Auto-select first session on mobile when sessions load
   useEffect(() => {
     const isMobile = window.matchMedia('(max-width: 767px)').matches
@@ -258,14 +278,17 @@ export default function App() {
       // Bracket navigation: [mod]+[ / ]
       if (isShortcut && (code === 'BracketLeft' || code === 'BracketRight')) {
         event.preventDefault()
-        const currentIndex = sortedSessions.findIndex(s => s.id === selectedSessionId)
-        if (currentIndex === -1 && sortedSessions.length > 0) {
-          setSelectedSessionId(sortedSessions[0].id)
+        // Use filtered sessions so navigation respects project filter
+        const navSessions = filteredSortedSessions
+        if (navSessions.length === 0) return
+        const currentIndex = navSessions.findIndex(s => s.id === selectedSessionId)
+        if (currentIndex === -1) {
+          setSelectedSessionId(navSessions[0].id)
           return
         }
         const delta = code === 'BracketLeft' ? -1 : 1
-        const newIndex = (currentIndex + delta + sortedSessions.length) % sortedSessions.length
-        setSelectedSessionId(sortedSessions[newIndex].id)
+        const newIndex = (currentIndex + delta + navSessions.length) % navSessions.length
+        setSelectedSessionId(navSessions[newIndex].id)
         return
       }
 
@@ -290,7 +313,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isModalOpen, selectedSessionId, setSelectedSessionId, sortedSessions, handleKillSession, shortcutModifier])
+  }, [isModalOpen, selectedSessionId, setSelectedSessionId, filteredSortedSessions, handleKillSession, shortcutModifier])
 
   const handleNewSession = () => setIsModalOpen(true)
   const handleOpenSettings = () => setIsSettingsOpen(true)
