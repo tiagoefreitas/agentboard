@@ -86,6 +86,7 @@ export default function Terminal({
   const useWebGL = useSettingsStore((state) => state.useWebGL)
   const fontSize = useSettingsStore((state) => state.fontSize)
   const lineHeight = useSettingsStore((state) => state.lineHeight)
+  const letterSpacing = useSettingsStore((state) => state.letterSpacing)
   const fontOption = useSettingsStore((state) => state.fontOption)
   const customFontFamily = useSettingsStore((state) => state.customFontFamily)
   const fontFamily = getFontFamily(fontOption, customFontFamily)
@@ -118,6 +119,7 @@ export default function Terminal({
     theme: terminalTheme,
     fontSize,
     lineHeight,
+    letterSpacing,
     fontFamily,
     useWebGL,
     onScrollChange: (isAtBottom) => {

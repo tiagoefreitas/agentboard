@@ -51,6 +51,8 @@ export default function SettingsModal({
   const setFontSize = useSettingsStore((state) => state.setFontSize)
   const lineHeight = useSettingsStore((state) => state.lineHeight)
   const setLineHeight = useSettingsStore((state) => state.setLineHeight)
+  const letterSpacing = useSettingsStore((state) => state.letterSpacing)
+  const setLetterSpacing = useSettingsStore((state) => state.setLetterSpacing)
   const fontOption = useSettingsStore((state) => state.fontOption)
   const setFontOption = useSettingsStore((state) => state.setFontOption)
   const customFontFamily = useSettingsStore((state) => state.customFontFamily)
@@ -88,6 +90,7 @@ export default function SettingsModal({
   const [draftUseWebGL, setDraftUseWebGL] = useState(useWebGL)
   const [draftFontSize, setDraftFontSize] = useState(fontSize)
   const [draftLineHeight, setDraftLineHeight] = useState(lineHeight)
+  const [draftLetterSpacing, setDraftLetterSpacing] = useState(letterSpacing)
   const [draftFontOption, setDraftFontOption] = useState<FontOption>(fontOption)
   const [draftCustomFontFamily, setDraftCustomFontFamily] = useState(customFontFamily)
   const [draftShortcutModifier, setDraftShortcutModifier] = useState<
@@ -126,6 +129,7 @@ export default function SettingsModal({
       setDraftUseWebGL(useWebGL)
       setDraftFontSize(fontSize)
       setDraftLineHeight(lineHeight)
+      setDraftLetterSpacing(letterSpacing)
       setDraftFontOption(fontOption)
       setDraftCustomFontFamily(customFontFamily)
       setDraftShortcutModifier(shortcutModifier)
@@ -176,6 +180,7 @@ export default function SettingsModal({
     useWebGL,
     fontSize,
     lineHeight,
+    letterSpacing,
     fontOption,
     customFontFamily,
     shortcutModifier,
@@ -217,6 +222,7 @@ export default function SettingsModal({
     setUseWebGL(draftUseWebGL)
     setFontSize(draftFontSize)
     setLineHeight(draftLineHeight)
+    setLetterSpacing(draftLetterSpacing)
     setFontOption(draftFontOption)
     setCustomFontFamily(draftCustomFontFamily)
     setShortcutModifier(draftShortcutModifier)
@@ -584,13 +590,13 @@ export default function SettingsModal({
               <div>
                 <div className="text-sm text-primary">Font Size</div>
                 <div className="text-[10px] text-muted">
-                  Terminal text size in pixels (8-24)
+                  Terminal text size in pixels (6-24)
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setDraftFontSize(Math.max(8, draftFontSize - 1))}
+                  onClick={() => setDraftFontSize(Math.max(6, draftFontSize - 1))}
                   className="flex h-7 w-7 items-center justify-center rounded bg-surface border border-border text-secondary hover:bg-hover"
                 >
                   <span className="text-sm font-bold">−</span>
@@ -610,7 +616,7 @@ export default function SettingsModal({
               <div>
                 <div className="text-sm text-primary">Line Height</div>
                 <div className="text-[10px] text-muted">
-                  Vertical spacing between lines (1.0 = compact, 2.0 = spacious)
+                  Vertical spacing (1.0 = compact, 2.0 = spacious)
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -624,6 +630,27 @@ export default function SettingsModal({
                   className="w-20 h-1 bg-border rounded-lg appearance-none cursor-pointer accent-accent"
                 />
                 <span className="text-xs text-secondary w-8 text-right">{draftLineHeight.toFixed(1)}</span>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between">
+              <div>
+                <div className="text-sm text-primary">Letter Spacing</div>
+                <div className="text-[10px] text-muted">
+                  Horizontal spacing between characters in pixels
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="-3"
+                  max="3"
+                  step="1"
+                  value={draftLetterSpacing}
+                  onChange={(e) => setDraftLetterSpacing(parseInt(e.target.value, 10))}
+                  className="w-20 h-1 bg-border rounded-lg appearance-none cursor-pointer accent-accent"
+                />
+                <span className="text-xs text-secondary w-8 text-right">{draftLetterSpacing}px</span>
               </div>
             </div>
 

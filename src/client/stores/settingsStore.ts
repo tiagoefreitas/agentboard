@@ -126,6 +126,8 @@ interface SettingsState {
   setFontSize: (size: number) => void
   lineHeight: number
   setLineHeight: (height: number) => void
+  letterSpacing: number
+  setLetterSpacing: (spacing: number) => void
   fontOption: FontOption
   setFontOption: (option: FontOption) => void
   customFontFamily: string
@@ -177,9 +179,11 @@ export const useSettingsStore = create<SettingsState>()(
       useWebGL: true,
       setUseWebGL: (enabled) => set({ useWebGL: enabled }),
       fontSize: 13,
-      setFontSize: (size) => set({ fontSize: Math.max(8, Math.min(24, size)) }),
-      lineHeight: 1.4,
+      setFontSize: (size) => set({ fontSize: Math.max(6, Math.min(24, size)) }),
+      lineHeight: 1.0,
       setLineHeight: (height) => set({ lineHeight: Math.max(1.0, Math.min(2.0, height)) }),
+      letterSpacing: 0,
+      setLetterSpacing: (spacing) => set({ letterSpacing: Math.max(-3, Math.min(3, spacing)) }),
       fontOption: 'jetbrains-mono',
       setFontOption: (option) => set({ fontOption: option }),
       customFontFamily: '',

@@ -184,6 +184,7 @@ function TerminalHarness(props: {
   theme: ITheme
   fontSize: number
   lineHeight?: number
+  letterSpacing?: number
   fontFamily?: string
   useWebGL?: boolean
   onScrollChange?: (isAtBottom: boolean) => void
@@ -191,7 +192,8 @@ function TerminalHarness(props: {
   const { containerRef } = useTerminal({
     ...props,
     tmuxTarget: props.tmuxTarget ?? null,
-    lineHeight: props.lineHeight ?? 1.4,
+    lineHeight: props.lineHeight ?? 1.0,
+    letterSpacing: props.letterSpacing ?? 0,
     fontFamily: props.fontFamily ?? '"JetBrains Mono Variable", monospace',
     useWebGL: props.useWebGL ?? true,
   })

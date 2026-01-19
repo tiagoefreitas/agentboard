@@ -111,6 +111,7 @@ interface UseTerminalOptions {
   theme: ITheme
   fontSize: number
   lineHeight: number
+  letterSpacing: number
   fontFamily: string
   useWebGL: boolean
   onScrollChange?: (isAtBottom: boolean) => void
@@ -124,6 +125,7 @@ export function useTerminal({
   theme,
   fontSize,
   lineHeight,
+  letterSpacing,
   fontFamily,
   useWebGL,
   onScrollChange,
@@ -232,6 +234,7 @@ export function useTerminal({
       fontFamily,
       fontSize,
       lineHeight: computedLineHeight,
+      letterSpacing,
       scrollback: 0, // Disabled - we use tmux scrollback instead
       cursorBlink: false,
       cursorStyle: 'underline',
@@ -513,7 +516,7 @@ export function useTerminal({
     }
   }, [theme])
 
-  // Update font size, lineHeight, and fontFamily (maintaining integer cell height)
+  // Update font size, lineHeight, letterSpacing, and fontFamily (maintaining integer cell height)
   useEffect(() => {
     const terminal = terminalRef.current
     const fitAddon = fitAddonRef.current
@@ -522,6 +525,7 @@ export function useTerminal({
       terminal.options.fontSize = fontSize
       // Recalculate lineHeight for integer cell height
       terminal.options.lineHeight = Math.round(fontSize * lineHeight) / fontSize
+      terminal.options.letterSpacing = letterSpacing
       fitAddon.fit()
       // Notify server of new dimensions
       const attached = attachedSessionRef.current
@@ -534,7 +538,7 @@ export function useTerminal({
         })
       }
     }
-  }, [fontSize, lineHeight, fontFamily])
+  }, [fontSize, lineHeight, letterSpacing, fontFamily])
 
   // Handle WebGL toggle at runtime
   useEffect(() => {

@@ -291,12 +291,18 @@ describe('command preset actions', () => {
     expect(useSettingsStore.getState().commandPresets.length).toBe(lengthBefore)
   })
 
-  test('clamps line height and toggles webgl', () => {
+  test('clamps line height, letter spacing, and toggles webgl', () => {
     useSettingsStore.getState().setLineHeight(0.5)
     expect(useSettingsStore.getState().lineHeight).toBe(1.0)
 
     useSettingsStore.getState().setLineHeight(2.5)
     expect(useSettingsStore.getState().lineHeight).toBe(2.0)
+
+    useSettingsStore.getState().setLetterSpacing(-5)
+    expect(useSettingsStore.getState().letterSpacing).toBe(-3)
+
+    useSettingsStore.getState().setLetterSpacing(5)
+    expect(useSettingsStore.getState().letterSpacing).toBe(3)
 
     useSettingsStore.getState().setUseWebGL(false)
     expect(useSettingsStore.getState().useWebGL).toBe(false)
