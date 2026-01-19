@@ -6,6 +6,35 @@ const DEFAULT_PROJECT_DIR = '~/Documents/GitHub'
 const DEFAULT_COMMAND = 'claude'
 const MAX_PRESETS = 50
 
+// Terminal font configuration
+export type FontOption = 'jetbrains-mono' | 'system' | 'custom'
+
+export const FONT_OPTIONS: { id: FontOption; label: string; family: string }[] = [
+  {
+    id: 'jetbrains-mono',
+    label: 'JetBrains Mono',
+    family: '"JetBrains Mono Variable", "JetBrains Mono", "SF Mono", "Fira Code", ui-monospace, monospace',
+  },
+  {
+    id: 'system',
+    label: 'System Default',
+    family: 'ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Code", "Consolas", monospace',
+  },
+  {
+    id: 'custom',
+    label: 'Custom',
+    family: '', // Uses customFontFamily setting
+  },
+]
+
+export function getFontFamily(fontOption: FontOption, customFontFamily: string): string {
+  if (fontOption === 'custom' && customFontFamily.trim()) {
+    return customFontFamily.trim()
+  }
+  const option = FONT_OPTIONS.find((o) => o.id === fontOption)
+  return option?.family || FONT_OPTIONS[0].family
+}
+
 export type SessionSortMode = 'status' | 'created' | 'manual'
 export type SessionSortDirection = 'asc' | 'desc'
 export type ShortcutModifier = 'ctrl-option' | 'ctrl-shift' | 'cmd-option' | 'cmd-shift'
@@ -97,6 +126,10 @@ interface SettingsState {
   setFontSize: (size: number) => void
   lineHeight: number
   setLineHeight: (height: number) => void
+  fontOption: FontOption
+  setFontOption: (option: FontOption) => void
+  customFontFamily: string
+  setCustomFontFamily: (family: string) => void
   shortcutModifier: ShortcutModifier | 'auto'
   setShortcutModifier: (modifier: ShortcutModifier | 'auto') => void
   showProjectName: boolean
@@ -147,6 +180,10 @@ export const useSettingsStore = create<SettingsState>()(
       setFontSize: (size) => set({ fontSize: Math.max(8, Math.min(24, size)) }),
       lineHeight: 1.4,
       setLineHeight: (height) => set({ lineHeight: Math.max(1.0, Math.min(2.0, height)) }),
+      fontOption: 'jetbrains-mono',
+      setFontOption: (option) => set({ fontOption: option }),
+      customFontFamily: '',
+      setCustomFontFamily: (family) => set({ customFontFamily: family.slice(0, 256) }),
       shortcutModifier: 'auto',
       setShortcutModifier: (modifier) => set({ shortcutModifier: modifier }),
       showProjectName: true,

@@ -111,6 +111,7 @@ interface UseTerminalOptions {
   theme: ITheme
   fontSize: number
   lineHeight: number
+  fontFamily: string
   useWebGL: boolean
   onScrollChange?: (isAtBottom: boolean) => void
 }
@@ -123,6 +124,7 @@ export function useTerminal({
   theme,
   fontSize,
   lineHeight,
+  fontFamily,
   useWebGL,
   onScrollChange,
 }: UseTerminalOptions) {
@@ -227,7 +229,7 @@ export function useTerminal({
     const computedLineHeight = calcLineHeight(fontSize, lineHeight)
 
     const terminal = new Terminal({
-      fontFamily: '"JetBrains Mono", "SF Mono", "Fira Code", monospace',
+      fontFamily,
       fontSize,
       lineHeight: computedLineHeight,
       scrollback: 0, // Disabled - we use tmux scrollback instead
@@ -511,11 +513,12 @@ export function useTerminal({
     }
   }, [theme])
 
-  // Update font size and lineHeight (maintaining integer cell height)
+  // Update font size, lineHeight, and fontFamily (maintaining integer cell height)
   useEffect(() => {
     const terminal = terminalRef.current
     const fitAddon = fitAddonRef.current
     if (terminal && fitAddon) {
+      terminal.options.fontFamily = fontFamily
       terminal.options.fontSize = fontSize
       // Recalculate lineHeight for integer cell height
       terminal.options.lineHeight = Math.round(fontSize * lineHeight) / fontSize
@@ -531,7 +534,7 @@ export function useTerminal({
         })
       }
     }
-  }, [fontSize, lineHeight])
+  }, [fontSize, lineHeight, fontFamily])
 
   // Handle WebGL toggle at runtime
   useEffect(() => {

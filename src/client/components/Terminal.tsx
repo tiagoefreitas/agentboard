@@ -3,7 +3,7 @@ import type { AgentSession, Session } from '@shared/types'
 import type { ConnectionStatus } from '../stores/sessionStore'
 import { useTerminal } from '../hooks/useTerminal'
 import { useThemeStore, terminalThemes } from '../stores/themeStore'
-import { useSettingsStore } from '../stores/settingsStore'
+import { useSettingsStore, getFontFamily } from '../stores/settingsStore'
 import { isIOSDevice, getEffectiveModifier, getModifierDisplay } from '../utils/device'
 import TerminalControls from './TerminalControls'
 import SessionDrawer from './SessionDrawer'
@@ -86,6 +86,9 @@ export default function Terminal({
   const useWebGL = useSettingsStore((state) => state.useWebGL)
   const fontSize = useSettingsStore((state) => state.fontSize)
   const lineHeight = useSettingsStore((state) => state.lineHeight)
+  const fontOption = useSettingsStore((state) => state.fontOption)
+  const customFontFamily = useSettingsStore((state) => state.customFontFamily)
+  const fontFamily = getFontFamily(fontOption, customFontFamily)
   const shortcutModifier = useSettingsStore((state) => state.shortcutModifier)
   const modDisplay = getModifierDisplay(getEffectiveModifier(shortcutModifier))
   const isiOS = isIOSDevice()
@@ -115,6 +118,7 @@ export default function Terminal({
     theme: terminalTheme,
     fontSize,
     lineHeight,
+    fontFamily,
     useWebGL,
     onScrollChange: (isAtBottom) => {
       setShowScrollButton(!isAtBottom)

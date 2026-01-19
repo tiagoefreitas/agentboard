@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import {
   DEFAULT_PROJECT_DIR,
   MAX_PRESETS,
+  FONT_OPTIONS,
   useSettingsStore,
   type CommandPreset,
+  type FontOption,
   type SessionSortDirection,
   type SessionSortMode,
   type ShortcutModifier,
@@ -49,6 +51,10 @@ export default function SettingsModal({
   const setFontSize = useSettingsStore((state) => state.setFontSize)
   const lineHeight = useSettingsStore((state) => state.lineHeight)
   const setLineHeight = useSettingsStore((state) => state.setLineHeight)
+  const fontOption = useSettingsStore((state) => state.fontOption)
+  const setFontOption = useSettingsStore((state) => state.setFontOption)
+  const customFontFamily = useSettingsStore((state) => state.customFontFamily)
+  const setCustomFontFamily = useSettingsStore((state) => state.setCustomFontFamily)
   const shortcutModifier = useSettingsStore((state) => state.shortcutModifier)
   const setShortcutModifier = useSettingsStore(
     (state) => state.setShortcutModifier
@@ -82,6 +88,8 @@ export default function SettingsModal({
   const [draftUseWebGL, setDraftUseWebGL] = useState(useWebGL)
   const [draftFontSize, setDraftFontSize] = useState(fontSize)
   const [draftLineHeight, setDraftLineHeight] = useState(lineHeight)
+  const [draftFontOption, setDraftFontOption] = useState<FontOption>(fontOption)
+  const [draftCustomFontFamily, setDraftCustomFontFamily] = useState(customFontFamily)
   const [draftShortcutModifier, setDraftShortcutModifier] = useState<
     ShortcutModifier | 'auto'
   >(shortcutModifier)
@@ -118,6 +126,8 @@ export default function SettingsModal({
       setDraftUseWebGL(useWebGL)
       setDraftFontSize(fontSize)
       setDraftLineHeight(lineHeight)
+      setDraftFontOption(fontOption)
+      setDraftCustomFontFamily(customFontFamily)
       setDraftShortcutModifier(shortcutModifier)
       setDraftShowProjectName(showProjectName)
       setDraftShowLastUserMessage(showLastUserMessage)
@@ -166,6 +176,8 @@ export default function SettingsModal({
     useWebGL,
     fontSize,
     lineHeight,
+    fontOption,
+    customFontFamily,
     shortcutModifier,
     showProjectName,
     showLastUserMessage,
@@ -205,6 +217,8 @@ export default function SettingsModal({
     setUseWebGL(draftUseWebGL)
     setFontSize(draftFontSize)
     setLineHeight(draftLineHeight)
+    setFontOption(draftFontOption)
+    setCustomFontFamily(draftCustomFontFamily)
     setShortcutModifier(draftShortcutModifier)
     setShowProjectName(draftShowProjectName)
     setShowLastUserMessage(draftShowLastUserMessage)
@@ -611,6 +625,36 @@ export default function SettingsModal({
                 />
                 <span className="text-xs text-secondary w-8 text-right">{draftLineHeight.toFixed(1)}</span>
               </div>
+            </div>
+
+            <div className="mt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm text-primary">Font Family</div>
+                  <div className="text-[10px] text-muted">
+                    Terminal typeface
+                  </div>
+                </div>
+                <select
+                  value={draftFontOption}
+                  onChange={(e) => setDraftFontOption(e.target.value as FontOption)}
+                  className="input text-xs py-1 px-2 w-auto"
+                >
+                  {FONT_OPTIONS.map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {draftFontOption === 'custom' && (
+                <input
+                  value={draftCustomFontFamily}
+                  onChange={(e) => setDraftCustomFontFamily(e.target.value)}
+                  placeholder='"Fira Code", monospace'
+                  className="input text-xs mt-2 font-mono"
+                />
+              )}
             </div>
 
             <div className="mt-4 flex items-center justify-between">
