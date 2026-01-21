@@ -330,8 +330,8 @@ describe('sessionRefreshWorker', () => {
       now += 1000
       const fourth = runRefresh()
       const fourthActivity = Date.parse(fourth.lastActivity)
-      expect(fourth.status).toBe('permission')
-      expect(fourthActivity).toBe(thirdActivity)
+      expect(fourth.status).toBe('working')
+      expect(fourthActivity).toBe(now)
     } finally {
       Date.now = originalNow
     }

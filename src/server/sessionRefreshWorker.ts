@@ -274,12 +274,6 @@ function inferStatus(
     return { status: 'unknown', lastChanged: now }
   }
 
-  // Check for permission prompts first (takes priority over working/waiting)
-  if (detectsPermissionPrompt(content)) {
-    const cached = paneContentCache.get(tmuxWindow)
-    return { status: 'permission', lastChanged: cached?.lastChanged ?? now }
-  }
-
   const cached = paneContentCache.get(tmuxWindow)
   let contentChanged = false
   if (cached !== undefined) {
@@ -297,11 +291,22 @@ function inferStatus(
 
   paneContentCache.set(tmuxWindow, { content, width, height, lastChanged })
 
+  const hasPermissionPrompt = detectsPermissionPrompt(content)
+
   // If no previous content, assume waiting (just started monitoring)
-  if (cached === undefined) {
+  if (cached === undefined && !hasPermissionPrompt) {
     return { status: 'waiting', lastChanged }
   }
 
-  // If content changed, it's working; otherwise waiting
-  return { status: contentChanged ? 'working' : 'waiting', lastChanged }
+  // Working takes precedence over permission prompts.
+  if (contentChanged) {
+    return { status: 'working', lastChanged }
+  }
+
+  if (hasPermissionPrompt) {
+    return { status: 'permission', lastChanged }
+  }
+
+  // If content did not change, it's waiting
+  return { status: 'waiting', lastChanged }
 }
