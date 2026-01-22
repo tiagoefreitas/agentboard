@@ -10,6 +10,7 @@ import type { Session } from '@shared/types'
 import { CornerDownLeftIcon } from '@untitledui-icons/react/line'
 import DPad from './DPad'
 import NumPad from './NumPad'
+import { isIOSDevice } from '../utils/device'
 
 interface SessionInfo {
   id: string
@@ -376,7 +377,7 @@ export default function TerminalControls({
   return (
     <div
       ref={controlsRef}
-      className="terminal-controls flex flex-col gap-1.5 px-2 py-2.5 bg-elevated border-t border-border md:hidden"
+      className={`terminal-controls flex flex-col gap-1.5 px-2 py-2.5 bg-elevated border-t border-border ${isIOSDevice() ? '' : 'md:hidden'}`}
     >
       {/* Session switcher row */}
       {showSessionRow && (

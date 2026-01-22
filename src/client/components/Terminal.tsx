@@ -149,14 +149,14 @@ export default function Terminal({
   }, [])
 
   useEffect(() => {
-    if (!isMobileLayout && isDrawerOpen) {
+    if (!isMobileLayout && !isiOS && isDrawerOpen) {
       setIsDrawerOpen(false)
     }
   }, [isDrawerOpen, isMobileLayout])
 
   // Swipe from left edge to open drawer
   useEffect(() => {
-    if (!isMobileLayout) return
+    if (!isMobileLayout && !isiOS) return
 
     const EDGE_THRESHOLD = 30 // pixels from left edge to start
     const SWIPE_DISTANCE = 50 // min horizontal swipe distance
@@ -206,7 +206,7 @@ export default function Terminal({
       document.removeEventListener('touchstart', handleTouchStart)
       document.removeEventListener('touchend', handleTouchEnd)
     }
-  }, [isMobileLayout, isDrawerOpen])
+  }, [isMobileLayout, isiOS, isDrawerOpen])
 
   // Close more menu when clicking outside
   useEffect(() => {
@@ -503,8 +503,8 @@ export default function Terminal({
     const container = containerRef.current
     if (!container || !session?.id) return
 
-    // Check if mobile
-    if (!isMobileLayout) return
+    // Check if mobile or iOS (iOS needs touch scroll even in landscape where width > 767px)
+    if (!isMobileLayout && !isiOS) return
     const TAP_MOVE_THRESHOLD = 6 // pixels - allows small jitter without canceling taps
     const LONG_PRESS_MS = 350
 
@@ -1100,7 +1100,7 @@ export default function Terminal({
       )}
 
       {/* Mobile session drawer */}
-      {isMobileLayout && (
+      {(isMobileLayout || isiOS) && (
         <SessionDrawer
           isOpen={isDrawerOpen}
           onClose={() => setIsDrawerOpen(false)}
