@@ -453,4 +453,62 @@ describe('LogPoller', () => {
     poller.stop()
     db.close()
   })
+
+  test('ignores external windows in name-based orphan fallback', async () => {
+    const db = initDatabase({ path: ':memory:' })
+    const registry = new SessionRegistry()
+    const externalWindow: Session = {
+      ...baseSession,
+      id: 'external:1',
+      name: 'orphan',
+      tmuxWindow: 'external:1',
+      projectPath: '/tmp/external',
+      source: 'external',
+    }
+    registry.replaceSessions([externalWindow])
+
+    const tokens = Array.from({ length: 10 }, (_, i) => `token${i}`).join(' ')
+    const projectPath = '/tmp/orphan'
+    const encoded = encodeProjectPath(projectPath)
+    const logDir = path.join(
+      process.env.CLAUDE_CONFIG_DIR ?? '',
+      'projects',
+      encoded
+    )
+    await fs.mkdir(logDir, { recursive: true })
+    const logPath = path.join(logDir, 'session-orphan.jsonl')
+    const line = buildUserLogEntry(tokens, {
+      sessionId: 'claude-session-orphan',
+      cwd: projectPath,
+    })
+    await fs.writeFile(logPath, `${line}\n`)
+
+    const stats = await fs.stat(logPath)
+    db.insertSession({
+      sessionId: 'claude-session-orphan',
+      logFilePath: logPath,
+      projectPath,
+      agentType: 'claude',
+      displayName: 'orphan',
+      createdAt: stats.birthtime.toISOString(),
+      lastActivityAt: stats.mtime.toISOString(),
+      lastUserMessage: null,
+      currentWindow: null,
+      isPinned: false,
+      lastResumeError: null,
+    })
+
+    const poller = new LogPoller(db, registry, {
+      matchWorkerClient: new InlineMatchWorkerClient(),
+    })
+    poller.start(5000)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    await poller.waitForOrphanRematch()
+
+    const updated = db.getSessionById('claude-session-orphan')
+    expect(updated?.currentWindow).toBeNull()
+
+    poller.stop()
+    db.close()
+  })
 })

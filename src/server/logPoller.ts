@@ -203,7 +203,16 @@ export class LogPoller {
       const windowsByTmux = new Map(
         windows.map((window) => [window.tmuxWindow, window])
       )
+      // Track claimed windows and matched orphan sessionIds for name fallback
+      const claimedWindows = new Set(
+        this.db
+          .getActiveSessions()
+          .map((s) => s.currentWindow)
+          .filter(Boolean) as string[]
+      )
+      const matchedOrphanSessionIds = new Set<string>()
       let orphanMatches = 0
+
       for (const match of response.orphanMatches ?? []) {
         const window = windowsByTmux.get(match.tmuxWindow)
         if (!window) continue
@@ -211,12 +220,11 @@ export class LogPoller {
         const existing = this.db.getSessionByLogPath(match.logPath)
         if (existing && !existing.currentWindow) {
           // Check if window is already claimed by another session
-          const claimed = this.db.getSessionByWindow(match.tmuxWindow)
-          if (claimed) {
+          if (claimedWindows.has(match.tmuxWindow)) {
             logger.info('orphan_rematch_skipped_window_claimed', {
               sessionId: existing.sessionId,
               window: match.tmuxWindow,
-              claimedBySessionId: claimed.sessionId,
+              claimedBySessionId: this.db.getSessionByWindow(match.tmuxWindow)?.sessionId,
             })
             continue
           }
@@ -224,6 +232,8 @@ export class LogPoller {
             currentWindow: match.tmuxWindow,
             displayName: window.name,
           })
+          claimedWindows.add(match.tmuxWindow)
+          matchedOrphanSessionIds.add(existing.sessionId)
           this.onSessionActivated?.(existing.sessionId, match.tmuxWindow)
           logger.info('orphan_rematch_success', {
             sessionId: existing.sessionId,
@@ -231,6 +241,53 @@ export class LogPoller {
             displayName: window.name,
           })
           orphanMatches++
+        }
+      }
+
+      // Name-based fallback for orphans that didn't get content-matched
+      const unmatchedOrphans = orphanCandidates.filter(
+        (o) => !matchedOrphanSessionIds.has(o.sessionId)
+      )
+
+      if (unmatchedOrphans.length > 0) {
+        // Build map of unclaimed window name -> window (only if name is unique)
+        // Only consider managed windows to avoid cross-session misassociation.
+        const unclaimedByName = new Map<string, Session>()
+        const ambiguousNames = new Set<string>()
+        for (const window of windows) {
+          if (window.source !== 'managed') continue
+          if (claimedWindows.has(window.tmuxWindow)) continue
+          if (ambiguousNames.has(window.name)) continue
+          if (unclaimedByName.has(window.name)) {
+            // Multiple windows with same name - mark as ambiguous, don't use for fallback
+            unclaimedByName.delete(window.name)
+            ambiguousNames.add(window.name)
+            continue
+          }
+          unclaimedByName.set(window.name, window)
+        }
+
+        // Match unmatched orphans by display name
+        for (const orphan of unmatchedOrphans) {
+          const existing = this.db.getSessionByLogPath(orphan.logFilePath)
+          if (!existing || existing.currentWindow) continue
+
+          const window = unclaimedByName.get(existing.displayName)
+          if (window) {
+            this.db.updateSession(existing.sessionId, {
+              currentWindow: window.tmuxWindow,
+              displayName: window.name,
+            })
+            claimedWindows.add(window.tmuxWindow)
+            unclaimedByName.delete(existing.displayName)
+            this.onSessionActivated?.(existing.sessionId, window.tmuxWindow)
+            logger.info('orphan_rematch_name_fallback', {
+              sessionId: existing.sessionId,
+              displayName: existing.displayName,
+              window: window.tmuxWindow,
+            })
+            orphanMatches++
+          }
         }
       }
 

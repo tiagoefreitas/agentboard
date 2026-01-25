@@ -15,6 +15,7 @@ import {
   TMUX_PROMPT_PREFIX,
   TMUX_UI_GLYPH_PATTERN,
 } from './terminal/tmuxText'
+import { logger } from './logger'
 
 export type LogTextMode = 'all' | 'assistant' | 'user' | 'assistant-user'
 
@@ -1410,4 +1411,68 @@ export function verifyWindowLogAssociation(
   // This prevents stale associations where shared content (like /plugin)
   // causes a weak match to pass verification
   return bestMatch !== null && bestMatch.logPath === logPath
+}
+
+// Tri-state verification types for hybrid session matching
+export type WindowLogVerificationStatus = 'verified' | 'mismatch' | 'inconclusive'
+
+export interface WindowLogVerificationResult {
+  status: WindowLogVerificationStatus
+  /** The best match found, if any */
+  bestMatch: ExactMatchResult | null
+  /** Why inconclusive (for debugging) */
+  reason?: 'no_match' | 'error'
+}
+
+/**
+ * Verify that a window's terminal content matches a specific log file.
+ *
+ * Returns detailed result with tri-state status:
+ * - 'verified': Window content matches the expected log (this log is the best match)
+ * - 'mismatch': Window content matches a DIFFERENT log (strong evidence of wrong association)
+ * - 'inconclusive': No confident match (empty scrollback, tie between logs, or error)
+ */
+export function verifyWindowLogAssociationDetailed(
+  tmuxWindow: string,
+  logPath: string,
+  logDirs: string[],
+  options: VerifyWindowLogOptions = {}
+): WindowLogVerificationResult {
+  const {
+    context = {},
+    scrollbackLines = DEFAULT_SCROLLBACK_LINES,
+    excludeLogPaths = [],
+  } = options
+
+  const excludeSet = new Set(excludeLogPaths)
+  excludeSet.delete(logPath)
+
+  try {
+    const bestMatch = tryExactMatchWindowToLog(
+      tmuxWindow,
+      logDirs,
+      scrollbackLines,
+      context,
+      { excludeLogPaths: excludeSet.size > 0 ? [...excludeSet] : undefined }
+    )
+
+    if (bestMatch === null) {
+      // null means no match or tie - treat as inconclusive
+      return { status: 'inconclusive', bestMatch: null, reason: 'no_match' }
+    }
+
+    if (bestMatch.logPath === logPath) {
+      return { status: 'verified', bestMatch }
+    }
+
+    return { status: 'mismatch', bestMatch }
+  } catch (error) {
+    // IO errors, parse errors, etc. - treat as inconclusive
+    logger.warn('verify_window_log_error', {
+      tmuxWindow,
+      logPath,
+      error: String(error),
+    })
+    return { status: 'inconclusive', bestMatch: null, reason: 'error' }
+  }
 }

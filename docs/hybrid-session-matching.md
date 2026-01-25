@@ -58,7 +58,7 @@ export interface WindowLogVerificationResult {
   /** The best match found, if any */
   bestMatch: ExactMatchResult | null
   /** Why inconclusive (for debugging) */
-  reason?: 'no_match' | 'tie' | 'error'
+  reason?: 'no_match' | 'error'
 }
 ```
 

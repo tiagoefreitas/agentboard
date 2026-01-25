@@ -11,7 +11,7 @@ import { initDatabase } from './db'
 import { LogPoller } from './logPoller'
 import { toAgentSession } from './agentSessions'
 import { getLogSearchDirs } from './logDiscovery'
-import { verifyWindowLogAssociation } from './logMatcher'
+import { verifyWindowLogAssociationDetailed } from './logMatcher'
 import {
   createTerminalProxy,
   resolveTerminalMode,
@@ -270,7 +270,7 @@ function hydrateSessionsWithAgentSessions(
         .filter((s) => s.sessionId !== agentSession.sessionId && s.currentWindow)
         .map((s) => s.logFilePath)
 
-      const verified = verifyWindowLogAssociation(
+      const verification = verifyWindowLogAssociationDetailed(
         agentSession.currentWindow,
         agentSession.logFilePath,
         logDirs,
@@ -280,18 +280,55 @@ function hydrateSessionsWithAgentSessions(
         }
       )
 
-      if (!verified) {
+      // Get the window to check name match for fallback
+      const window = sessions.find((s) => s.tmuxWindow === agentSession.currentWindow)
+      const nameMatches = Boolean(window && window.name === agentSession.displayName)
+
+      // Decide whether to orphan based on verification status and name match
+      let shouldOrphan = false
+      let fallbackUsed = false
+
+      if (verification.status === 'verified') {
+        // Content confirms association - keep
+        shouldOrphan = false
+      } else if (verification.status === 'mismatch') {
+        // Content proves wrong association - orphan regardless of name
+        shouldOrphan = true
+      } else {
+        // Inconclusive - use name as fallback
+        if (nameMatches) {
+          shouldOrphan = false
+          fallbackUsed = true
+        } else {
+          shouldOrphan = true
+        }
+      }
+
+      if (shouldOrphan) {
         logger.info('session_verification_failed', {
           sessionId: agentSession.sessionId,
           displayName: agentSession.displayName,
           currentWindow: agentSession.currentWindow,
           logFilePath: agentSession.logFilePath,
+          verificationStatus: verification.status,
+          verificationReason: verification.reason ?? null,
+          nameMatches,
+          bestMatchLog: verification.bestMatch?.logPath ?? null,
         })
         const orphanedSession = db.orphanSession(agentSession.sessionId)
         if (orphanedSession) {
           orphaned.push(toAgentSession(orphanedSession))
         }
         continue
+      }
+
+      if (fallbackUsed) {
+        logger.info('session_verification_name_fallback', {
+          sessionId: agentSession.sessionId,
+          displayName: agentSession.displayName,
+          currentWindow: agentSession.currentWindow,
+          verificationStatus: verification.status,
+        })
       }
     }
 
