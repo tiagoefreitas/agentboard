@@ -79,6 +79,7 @@ export type ServerMessage =
       retryable: boolean
     }
   | { type: 'terminal-ready'; sessionId: string }
+  | { type: 'tmux-copy-mode-status'; sessionId: string; inCopyMode: boolean }
   | { type: 'error'; message: string }
   | { type: 'kill-failed'; sessionId: string; message: string }
 
@@ -103,5 +104,6 @@ export type ClientMessage =
   | { type: 'session-rename'; sessionId: string; newName: string }
   | { type: 'session-refresh' }
   | { type: 'tmux-cancel-copy-mode'; sessionId: string }
+  | { type: 'tmux-check-copy-mode'; sessionId: string }
   | { type: 'session-resume'; sessionId: string; name?: string }
   | { type: 'session-pin'; sessionId: string; isPinned: boolean }

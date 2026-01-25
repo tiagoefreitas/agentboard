@@ -272,7 +272,7 @@ describe('Terminal', () => {
     }
 
     act(() => {
-      terminalInstance.emitWheel({ deltaY: 30 } as WheelEvent)
+      terminalInstance.emitWheel({ deltaY: -30 } as WheelEvent)
     })
 
     const scrollButton = renderer.root.findAllByType('button').find(
@@ -557,7 +557,7 @@ describe('Terminal', () => {
     }
 
     act(() => {
-      terminalInstance.emitWheel({ deltaY: 60 } as WheelEvent)
+      terminalInstance.emitWheel({ deltaY: -60 } as WheelEvent)
     })
 
     const keyboardButton = renderer.root.findByProps({ 'aria-label': 'Show keyboard' })

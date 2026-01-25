@@ -361,7 +361,7 @@ describe('useTerminal', () => {
     terminal.selection = ''
 
     act(() => {
-      terminal.emitWheel({ deltaY: 30 } as WheelEvent)
+      terminal.emitWheel({ deltaY: -30 } as WheelEvent)
     })
 
     expect(scrollStates).toContain(false)

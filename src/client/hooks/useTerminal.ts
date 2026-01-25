@@ -147,6 +147,7 @@ export function useTerminal({
   // Wheel event handling for tmux scrollback
   const wheelAccumRef = useRef<number>(0)
   const inTmuxCopyModeRef = useRef<boolean>(false)
+  const copyModeCheckTimer = useRef<number | null>(null)
 
   // Track the currently attached session to prevent race conditions
   const attachedSessionRef = useRef<string | null>(null)
@@ -192,6 +193,21 @@ export function useTerminal({
     inTmuxCopyModeRef.current = nextValue
     checkScrollPosition()
   }, [checkScrollPosition])
+
+  // Request tmux copy-mode status from server (debounced)
+  const requestCopyModeCheck = useCallback(() => {
+    const attached = attachedSessionRef.current
+    if (!attached) return
+
+    // Debounce: clear existing timer and set a new one
+    if (copyModeCheckTimer.current !== null) {
+      window.clearTimeout(copyModeCheckTimer.current)
+    }
+    copyModeCheckTimer.current = window.setTimeout(() => {
+      copyModeCheckTimer.current = null
+      sendMessageRef.current({ type: 'tmux-check-copy-mode', sessionId: attached })
+    }, 150) // Check 150ms after last scroll
+  }, [])
 
   const fitAndResize = useCallback(() => {
     const terminal = terminalRef.current
@@ -437,12 +453,16 @@ export function useTerminal({
       const col = Math.floor(cols / 2)
       const row = Math.floor(rows / 2)
 
+      let scrolledUp = false
+      let didScroll = false
       while (Math.abs(wheelAccumRef.current) >= STEP) {
+        didScroll = true
         const down = wheelAccumRef.current > 0
         wheelAccumRef.current += down ? -STEP : STEP
 
         // SGR mouse wheel: button 64 = scroll up, 65 = scroll down
         const button = down ? 65 : 64
+        if (!down) scrolledUp = true
         sendMessageRef.current({
           type: 'terminal-input',
           sessionId: attached,
@@ -450,7 +470,14 @@ export function useTerminal({
         })
       }
 
-      setTmuxCopyMode(true)
+      // Optimistically show button when scrolling up
+      if (scrolledUp) {
+        setTmuxCopyMode(true)
+      }
+      // Request actual copy-mode status from tmux (debounced) - only if we sent scroll
+      if (didScroll) {
+        requestCopyModeCheck()
+      }
       return false // We handled it, prevent xterm local scroll
     })
 
@@ -504,6 +531,9 @@ export function useTerminal({
       progressAddonRef.current = null
       if (fitTimer.current) {
         window.clearTimeout(fitTimer.current)
+      }
+      if (copyModeCheckTimer.current !== null) {
+        window.clearTimeout(copyModeCheckTimer.current)
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -682,6 +712,15 @@ export function useTerminal({
         outputBufferRef.current += forceTextPresentation(message.data)
         scheduleFlush()
       }
+
+      // Handle tmux copy-mode status response
+      if (
+        message.type === 'tmux-copy-mode-status' &&
+        attachedSession &&
+        message.sessionId === attachedSession
+      ) {
+        setTmuxCopyMode(message.inCopyMode)
+      }
     })
 
     return () => {
@@ -689,7 +728,7 @@ export function useTerminal({
       // Flush any remaining buffer on cleanup
       flush()
     }
-  }, [subscribe, checkScrollPosition])
+  }, [subscribe, checkScrollPosition, setTmuxCopyMode])
 
   // Handle resize - with longer debounce to prevent flickering
   useEffect(() => {

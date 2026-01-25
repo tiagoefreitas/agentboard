@@ -208,6 +208,7 @@ const sessionRefreshWorker = new SessionRefreshWorkerClient()
 interface WSData {
   terminal: ITerminalProxy | null
   currentSessionId: string | null
+  currentTmuxTarget: string | null
   connectionId: string
 }
 
@@ -291,17 +292,16 @@ function hydrateSessionsWithAgentSessions(
       if (verification.status === 'verified') {
         // Content confirms association - keep
         shouldOrphan = false
-      } else if (verification.status === 'mismatch') {
-        // Content proves wrong association - orphan regardless of name
-        shouldOrphan = true
+      } else if (nameMatches) {
+        // Name matches - trust it over content mismatch/inconclusive
+        // Window names are user-intentional signals, so honor them even if
+        // content matching finds a "better" match in another log (which can
+        // happen due to similar content across sessions or limited scrollback)
+        shouldOrphan = false
+        fallbackUsed = true
       } else {
-        // Inconclusive - use name as fallback
-        if (nameMatches) {
-          shouldOrphan = false
-          fallbackUsed = true
-        } else {
-          shouldOrphan = true
-        }
+        // No name match and content doesn't verify - orphan
+        shouldOrphan = true
       }
 
       if (shouldOrphan) {
@@ -746,6 +746,7 @@ Bun.serve<WSData>({
           data: {
             terminal: null,
             currentSessionId: null,
+            currentTmuxTarget: null,
             connectionId: createConnectionId(),
           },
         })
@@ -814,6 +815,7 @@ function cleanupTerminals(ws: ServerWebSocket<WSData>) {
     ws.data.terminal = null
   }
   ws.data.currentSessionId = null
+  ws.data.currentTmuxTarget = null
 }
 
 function broadcast(message: ServerMessage) {
@@ -893,7 +895,10 @@ function handleMessage(
       return
     case 'tmux-cancel-copy-mode':
       // Exit tmux copy-mode when user starts typing after scrolling
-      handleCancelCopyMode(message.sessionId)
+      handleCancelCopyMode(message.sessionId, ws)
+      return
+    case 'tmux-check-copy-mode':
+      handleCheckCopyMode(message.sessionId, ws)
       return
     case 'session-resume':
       handleSessionResume(message, ws)
@@ -906,18 +911,50 @@ function handleMessage(
   }
 }
 
-function handleCancelCopyMode(sessionId: string) {
+function resolveCopyModeTarget(
+  sessionId: string,
+  ws: ServerWebSocket<WSData>,
+  session: Session
+): string {
+  if (ws.data.currentSessionId === sessionId && ws.data.currentTmuxTarget) {
+    return ws.data.currentTmuxTarget
+  }
+  return session.tmuxWindow
+}
+
+function handleCancelCopyMode(sessionId: string, ws: ServerWebSocket<WSData>) {
   const session = registry.get(sessionId)
   if (!session) return
 
   try {
     // Exit tmux copy-mode quietly.
-    Bun.spawnSync(['tmux', 'send-keys', '-X', '-t', session.tmuxWindow, 'cancel'], {
+    const target = resolveCopyModeTarget(sessionId, ws, session)
+    Bun.spawnSync(['tmux', 'send-keys', '-X', '-t', target, 'cancel'], {
       stdout: 'pipe',
       stderr: 'pipe',
     })
   } catch {
     // Ignore errors - copy-mode may not be active
+  }
+}
+
+function handleCheckCopyMode(sessionId: string, ws: ServerWebSocket<WSData>) {
+  const session = registry.get(sessionId)
+  if (!session) return
+
+  try {
+    const target = resolveCopyModeTarget(sessionId, ws, session)
+    // Query tmux for pane copy-mode status
+    const result = Bun.spawnSync(
+      ['tmux', 'display-message', '-p', '-t', target, '#{pane_in_mode}'],
+      { stdout: 'pipe', stderr: 'pipe' }
+    )
+    const output = result.stdout.toString().trim()
+    const inCopyMode = output === '1'
+    send(ws, { type: 'tmux-copy-mode-status', sessionId, inCopyMode })
+  } catch {
+    // On error, assume not in copy mode
+    send(ws, { type: 'tmux-copy-mode-status', sessionId, inCopyMode: false })
   }
 }
 
@@ -1246,6 +1283,7 @@ function createPersistentTerminal(ws: ServerWebSocket<WSData>) {
     onExit: () => {
       const sessionId = ws.data.currentSessionId
       ws.data.currentSessionId = null
+      ws.data.currentTmuxTarget = null
       ws.data.terminal = null
       void terminal.dispose()
       if (sockets.has(ws)) {
@@ -1318,12 +1356,14 @@ async function attachTerminalPersistent(
   try {
     await terminal.switchTo(target, () => {
       ws.data.currentSessionId = sessionId
+      ws.data.currentTmuxTarget = target
       // Send history in onReady callback, before output suppression is lifted
       if (history) {
         send(ws, { type: 'terminal-output', sessionId, data: history })
       }
     })
     ws.data.currentSessionId = sessionId
+    ws.data.currentTmuxTarget = target
     send(ws, { type: 'terminal-ready', sessionId })
   } catch (error) {
     handleTerminalError(ws, sessionId, error, 'ERR_TMUX_SWITCH_FAILED')
@@ -1354,6 +1394,7 @@ function captureTmuxHistory(target: string): string | null {
 function detachTerminalPersistent(ws: ServerWebSocket<WSData>, sessionId: string) {
   if (ws.data.currentSessionId === sessionId) {
     ws.data.currentSessionId = null
+    ws.data.currentTmuxTarget = null
   }
 }
 

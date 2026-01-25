@@ -30,12 +30,15 @@ if (!tmuxAvailable) {
     )
     let serverProcess: ReturnType<typeof Bun.spawn> | null = null
     let port = 0
+    const originalTmuxTmpDir = process.env.TMUX_TMPDIR
+    let tmuxTmpDir: string | null = null
 
     // Session ID for pin/unpin test - seeded before server starts
     const wsTestSessionId = `ws-pin-test-${Date.now()}`
 
     async function startServer() {
       port = await getFreePort()
+      const resumeCommand = 'sh -c "sleep 30" -- {sessionId}'
       serverProcess = Bun.spawn(['bun', 'src/server/index.ts'], {
         cwd: process.cwd(),
         env: {
@@ -45,9 +48,9 @@ if (!tmuxAvailable) {
           DISCOVER_PREFIXES: '',
           AGENTBOARD_LOG_POLL_MS: '0',
           AGENTBOARD_DB_PATH: dbPath,
-          // Use echo as a mock resume command for testing
-          CLAUDE_RESUME_CMD: 'echo "mock resume {sessionId}"',
-          CODEX_RESUME_CMD: 'echo "mock resume {sessionId}"',
+          // Use a long-lived command so windows stay open during the test
+          CLAUDE_RESUME_CMD: resumeCommand,
+          CODEX_RESUME_CMD: resumeCommand,
         },
         stdout: 'ignore',
         stderr: 'ignore',
@@ -68,6 +71,9 @@ if (!tmuxAvailable) {
     }
 
     beforeAll(async () => {
+      tmuxTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentboard-tmux-'))
+      process.env.TMUX_TMPDIR = tmuxTmpDir
+
       // Create the tmux session first (required for resurrection to work)
       Bun.spawnSync(['tmux', 'new-session', '-d', '-s', sessionName], {
         stdout: 'ignore',
@@ -104,6 +110,18 @@ if (!tmuxAvailable) {
       } catch {
         // ignore cleanup errors
       }
+      if (tmuxTmpDir) {
+        try {
+          fs.rmSync(tmuxTmpDir, { recursive: true, force: true })
+        } catch {
+          // ignore cleanup errors
+        }
+      }
+      if (originalTmuxTmpDir === undefined) {
+        delete process.env.TMUX_TMPDIR
+      } else {
+        process.env.TMUX_TMPDIR = originalTmuxTmpDir
+      }
       try {
         fs.unlinkSync(dbPath)
       } catch {
@@ -111,15 +129,37 @@ if (!tmuxAvailable) {
       }
     })
 
-    // Resurrection test is skipped because it's flaky in CI due to tmux environment
-    // complexities. The core resurrection logic is covered by:
-    // 1. Unit tests for getPinnedOrphaned() and setPinned() in db.test.ts
-    // 2. The fact that resurrectPinnedSessions() is called on startup (verified by logs)
-    // Manual testing can verify full end-to-end resurrection.
-    test.skip('pinned session resurrects after server restart', async () => {
-      // This test requires a stable tmux environment which is hard to achieve
-      // when running alongside other integration tests.
-    })
+    test(
+      'pinned session resurrects after server restart',
+      async () => {
+      await stopServer()
+
+      const resurrectSessionId = `pin-resurrect-${Date.now()}`
+      const db = initDatabase({ path: dbPath })
+      db.insertSession({
+        sessionId: resurrectSessionId,
+        logFilePath: `/tmp/${resurrectSessionId}.jsonl`,
+        projectPath: os.tmpdir(),
+        agentType: 'claude',
+        displayName: 'pin-resurrect',
+        createdAt: new Date().toISOString(),
+        lastActivityAt: new Date().toISOString(),
+        lastUserMessage: null,
+        currentWindow: null,
+        isPinned: true,
+        lastResumeError: null,
+      })
+      db.close()
+
+      await startServer()
+
+      const resurrected = await waitForResurrectedSession(resurrectSessionId, port)
+      expect(resurrected.agentSessionId).toBe(resurrectSessionId)
+      expect(resurrected.isPinned).toBe(true)
+      expect(resurrected.tmuxWindow.startsWith(`${sessionName}:`)).toBe(true)
+      },
+      15000
+    )
 
     // Note: "failed resurrection unpins session" test is not included because
     // createWindow doesn't fail on invalid paths - tmux still creates the window.
@@ -193,6 +233,38 @@ async function waitForHealth(port: number, timeoutMs = 8000): Promise<void> {
     await delay(150)
   }
   throw new Error('Server did not become healthy in time')
+}
+
+type SessionPayload = {
+  agentSessionId?: string
+  isPinned?: boolean
+  tmuxWindow: string
+}
+
+async function waitForResurrectedSession(
+  sessionId: string,
+  port: number,
+  timeoutMs = 8000
+): Promise<SessionPayload> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const response = await fetch(`http://localhost:${port}/api/sessions`)
+      if (response.ok) {
+        const sessions = (await response.json()) as SessionPayload[]
+        const match = sessions.find(
+          (session) => session.agentSessionId === sessionId && session.isPinned
+        )
+        if (match) {
+          return match
+        }
+      }
+    } catch {
+      // retry
+    }
+    await delay(150)
+  }
+  throw new Error('Pinned session did not resurrect in time')
 }
 
 async function waitForOpen(ws: WebSocket, timeoutMs = 5000): Promise<void> {
