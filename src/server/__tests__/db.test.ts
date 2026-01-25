@@ -18,6 +18,7 @@ function makeSession(overrides: Partial<{
   lastActivityAt: string
   lastUserMessage: string | null
   currentWindow: string | null
+  isPinned: boolean
 }> = {}) {
   return {
     sessionId: 'session-abc',
@@ -29,6 +30,7 @@ function makeSession(overrides: Partial<{
     lastActivityAt: now,
     lastUserMessage: null,
     currentWindow: 'agentboard:1',
+    isPinned: false,
     ...overrides,
   }
 }
@@ -69,6 +71,52 @@ describe('db', () => {
 
     const orphaned = db.orphanSession(session.sessionId)
     expect(orphaned?.currentWindow).toBeNull()
+  })
+
+  test('setPinned updates is_pinned flag', () => {
+    const session = makeSession()
+    db.insertSession(session)
+
+    // Initially not pinned
+    expect(db.getSessionById(session.sessionId)?.isPinned).toBe(false)
+
+    // Pin it
+    const pinned = db.setPinned(session.sessionId, true)
+    expect(pinned?.isPinned).toBe(true)
+    expect(db.getSessionById(session.sessionId)?.isPinned).toBe(true)
+
+    // Unpin it
+    const unpinned = db.setPinned(session.sessionId, false)
+    expect(unpinned?.isPinned).toBe(false)
+    expect(db.getSessionById(session.sessionId)?.isPinned).toBe(false)
+  })
+
+  test('getPinnedOrphaned returns pinned sessions without window', () => {
+    // Pinned + orphaned (should be returned)
+    db.insertSession(makeSession({
+      sessionId: 'a',
+      logFilePath: '/tmp/a.jsonl',
+      isPinned: true,
+      currentWindow: null,
+    }))
+    // Pinned + active (should NOT be returned)
+    db.insertSession(makeSession({
+      sessionId: 'b',
+      logFilePath: '/tmp/b.jsonl',
+      isPinned: true,
+      currentWindow: 'agentboard:1',
+    }))
+    // Not pinned + orphaned (should NOT be returned)
+    db.insertSession(makeSession({
+      sessionId: 'c',
+      logFilePath: '/tmp/c.jsonl',
+      isPinned: false,
+      currentWindow: null,
+    }))
+
+    const orphaned = db.getPinnedOrphaned()
+    expect(orphaned).toHaveLength(1)
+    expect(orphaned[0].sessionId).toBe('a')
   })
 
   test('displayNameExists returns true for existing names', () => {

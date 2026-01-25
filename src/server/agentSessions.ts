@@ -13,6 +13,7 @@ export function toAgentSession(record: AgentSessionRecord): AgentSession {
     lastActivityAt: record.lastActivityAt,
     isActive: record.currentWindow !== null,
     lastUserMessage: record.lastUserMessage ?? undefined,
+    isPinned: record.isPinned,
   }
 }
 

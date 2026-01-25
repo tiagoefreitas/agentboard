@@ -632,6 +632,7 @@ export class LogPoller {
             lastActivityAt,
             lastUserMessage: currentWindow ? null : (entry.lastUserMessage ?? null),
             currentWindow,
+            isPinned: false,
           })
           newSessions += 1
           if (currentWindow) {

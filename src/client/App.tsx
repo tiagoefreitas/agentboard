@@ -185,6 +185,12 @@ export default function App() {
         setServerError(message.message)
         window.setTimeout(() => setServerError(null), 6000)
       }
+      if (message.type === 'session-pin-result') {
+        if (!message.ok && message.error) {
+          setServerError(message.error)
+          window.setTimeout(() => setServerError(null), 6000)
+        }
+      }
     })
 
     return () => { unsubscribe() }
@@ -342,6 +348,10 @@ export default function App() {
     }
   }, [sessions, sendMessage])
 
+  const handleSetPinned = useCallback((sessionId: string, isPinned: boolean) => {
+    sendMessage({ type: 'session-pin', sessionId, isPinned })
+  }, [sendMessage])
+
   // Apply theme to document
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -377,6 +387,7 @@ export default function App() {
           onResume={handleResumeSession}
           onKill={handleKillSession}
           onDuplicate={handleDuplicateSession}
+          onSetPinned={handleSetPinned}
           onOpenSettings={handleOpenSettings}
           loading={!hasLoaded}
           error={connectionError || serverError}

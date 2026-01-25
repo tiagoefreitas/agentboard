@@ -21,6 +21,7 @@ import Copy01Icon from '@untitledui-icons/react/line/esm/Copy01Icon'
 import ChevronDownIcon from '@untitledui-icons/react/line/esm/ChevronDownIcon'
 import ChevronRightIcon from '@untitledui-icons/react/line/esm/ChevronRightIcon'
 import Edit05Icon from '@untitledui-icons/react/line/esm/Edit05Icon'
+import Pin02Icon from '@untitledui-icons/react/line/esm/Pin02Icon'
 import Settings01Icon from '@untitledui-icons/react/line/esm/Settings01Icon'
 import type { AgentSession, Session } from '@shared/types'
 import { getSessionOrderKey, getUniqueProjects, sortSessions } from '../utils/sessions'
@@ -47,6 +48,7 @@ interface SessionListProps {
   onResume?: (sessionId: string) => void
   onKill?: (sessionId: string) => void
   onDuplicate?: (sessionId: string) => void
+  onSetPinned?: (sessionId: string, isPinned: boolean) => void
   onOpenSettings?: () => void
 }
 
@@ -77,6 +79,7 @@ export default function SessionList({
   onResume,
   onKill,
   onDuplicate,
+  onSetPinned,
   onOpenSettings,
 }: SessionListProps) {
   useTimestampRefresh()
@@ -609,6 +612,7 @@ export default function SessionList({
                         onRename={(newName) => handleRename(session.id, newName)}
                         onKill={onKill ? () => onKill(session.id) : undefined}
                         onDuplicate={onDuplicate ? () => onDuplicate(session.id) : undefined}
+                        onSetPinned={onSetPinned && session.agentSessionId ? (isPinned) => onSetPinned(session.agentSessionId!.trim(), isPinned) : undefined}
                         onOpenSettings={onOpenSettings}
                       />
                     )
@@ -737,6 +741,7 @@ interface SortableSessionItemProps {
   onRename: (newName: string) => void
   onKill?: () => void
   onDuplicate?: () => void
+  onSetPinned?: (isPinned: boolean) => void
   onOpenSettings?: () => void
 }
 
@@ -760,6 +765,7 @@ const SortableSessionItem = forwardRef<HTMLDivElement, SortableSessionItemProps>
   onRename,
   onKill,
   onDuplicate,
+  onSetPinned,
   onOpenSettings,
 }, ref) {
   const {
@@ -848,6 +854,7 @@ const SortableSessionItem = forwardRef<HTMLDivElement, SortableSessionItemProps>
         onRename={onRename}
         onKill={onKill}
         onDuplicate={onDuplicate}
+        onSetPinned={onSetPinned}
         onOpenSettings={onOpenSettings}
       />
       {dropIndicator === 'below' && (
@@ -873,6 +880,7 @@ interface SessionRowProps {
   onRename: (newName: string) => void
   onKill?: () => void
   onDuplicate?: () => void
+  onSetPinned?: (isPinned: boolean) => void
   onOpenSettings?: () => void
 }
 
@@ -890,6 +898,7 @@ function SessionRow({
   onRename,
   onKill,
   onDuplicate,
+  onSetPinned,
   onOpenSettings,
 }: SessionRowProps) {
   const lastActivity = formatRelativeTime(session.lastActivity)
@@ -1056,6 +1065,13 @@ function SessionRow({
               {displayName}
             </span>
           )}
+          {session.isPinned && (
+            <Pin02Icon
+              className="h-3 w-3 shrink-0 text-muted"
+              aria-label="Pinned"
+              title="Pinned - will auto-resume on server restart"
+            />
+          )}
           {sessionIdPrefix && (
             <span
               className="shrink-0 text-[11px] font-mono text-muted"
@@ -1134,6 +1150,20 @@ function SessionRow({
             >
               <Copy01Icon width={14} height={14} />
               Duplicate
+            </button>
+          )}
+          {onSetPinned && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setContextMenu(null)
+                onSetPinned(!session.isPinned)
+              }}
+              className="w-full px-3 py-2 text-left text-sm text-secondary hover:bg-hover hover:text-primary flex items-center gap-2"
+              role="menuitem"
+            >
+              <Pin02Icon width={14} height={14} />
+              {session.isPinned ? 'Unpin' : 'Pin'}
             </button>
           )}
           {onKill && (

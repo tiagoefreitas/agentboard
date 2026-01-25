@@ -393,10 +393,10 @@ describe('server message handlers', () => {
     )
     websocket.message?.(ws as never, refreshPayload)
 
-    // 2 calls: startup logging + initial sync refresh
+    // 3 calls: startup logging + initial sync refresh + post-resurrection refresh
     // (message refresh uses async worker, not sessionManager.listWindows)
-    expect(listCalls).toBe(2)
-    expect(replaceSessionsCalls).toHaveLength(1)
+    expect(listCalls).toBe(3)
+    expect(replaceSessionsCalls).toHaveLength(2)
 
     websocket.message?.(
       ws as never,

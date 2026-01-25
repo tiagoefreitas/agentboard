@@ -15,6 +15,7 @@ export interface AgentSessionRecord {
   lastActivityAt: string
   lastUserMessage: string | null
   currentWindow: string | null
+  isPinned: boolean
 }
 
 export interface SessionDatabase {
@@ -31,6 +32,8 @@ export interface SessionDatabase {
   getInactiveSessions: () => AgentSessionRecord[]
   orphanSession: (sessionId: string) => AgentSessionRecord | null
   displayNameExists: (displayName: string, excludeSessionId?: string) => boolean
+  setPinned: (sessionId: string, isPinned: boolean) => AgentSessionRecord | null
+  getPinnedOrphaned: () => AgentSessionRecord[]
   close: () => void
 }
 
@@ -51,7 +54,8 @@ const AGENT_SESSIONS_COLUMNS_SQL = `
   created_at TEXT NOT NULL,
   last_activity_at TEXT NOT NULL,
   last_user_message TEXT,
-  current_window TEXT
+  current_window TEXT,
+  is_pinned INTEGER NOT NULL DEFAULT 0
 `
 
 const CREATE_TABLE_SQL = `
@@ -82,11 +86,12 @@ export function initDatabase(options: { path?: string } = {}): SessionDatabase {
   db.exec(CREATE_INDEXES_SQL)
   migrateLastUserMessageColumn(db)
   migrateDeduplicateDisplayNames(db)
+  migrateIsPinnedColumn(db)
 
   const insertStmt = db.prepare(
     `INSERT INTO agent_sessions
-      (session_id, log_file_path, project_path, agent_type, display_name, created_at, last_activity_at, last_user_message, current_window)
-     VALUES ($sessionId, $logFilePath, $projectPath, $agentType, $displayName, $createdAt, $lastActivityAt, $lastUserMessage, $currentWindow)`
+      (session_id, log_file_path, project_path, agent_type, display_name, created_at, last_activity_at, last_user_message, current_window, is_pinned)
+     VALUES ($sessionId, $logFilePath, $projectPath, $agentType, $displayName, $createdAt, $lastActivityAt, $lastUserMessage, $currentWindow, $isPinned)`
   )
 
   const selectBySessionId = db.prepare(
@@ -131,6 +136,7 @@ export function initDatabase(options: { path?: string } = {}): SessionDatabase {
         $lastActivityAt: session.lastActivityAt,
         $lastUserMessage: session.lastUserMessage,
         $currentWindow: session.currentWindow,
+        $isPinned: session.isPinned ? 1 : 0,
       })
       const row = selectBySessionId.get({ $sessionId: session.sessionId }) as
         | Record<string, unknown>
@@ -159,6 +165,7 @@ export function initDatabase(options: { path?: string } = {}): SessionDatabase {
         lastActivityAt: 'last_activity_at',
         lastUserMessage: 'last_user_message',
         currentWindow: 'current_window',
+        isPinned: 'is_pinned',
       }
 
       const fields: string[] = []
@@ -227,6 +234,24 @@ export function initDatabase(options: { path?: string } = {}): SessionDatabase {
         : selectByDisplayName.get({ $displayName: displayName })
       return row != null
     },
+    setPinned: (sessionId, isPinned) => {
+      updateStmt(['is_pinned']).run({
+        $sessionId: sessionId,
+        $is_pinned: isPinned ? 1 : 0,
+      })
+      const row = selectBySessionId.get({ $sessionId: sessionId }) as
+        | Record<string, unknown>
+        | undefined
+      return row ? mapRow(row) : null
+    },
+    getPinnedOrphaned: () => {
+      const rows = db
+        .prepare(
+          'SELECT * FROM agent_sessions WHERE is_pinned = 1 AND current_window IS NULL ORDER BY last_activity_at DESC'
+        )
+        .all() as Record<string, unknown>[]
+      return rows.map(mapRow)
+    },
     close: () => {
       db.close()
     },
@@ -272,6 +297,7 @@ function mapRow(row: Record<string, unknown>): AgentSessionRecord {
       row.current_window === null || row.current_window === undefined
         ? null
         : String(row.current_window),
+    isPinned: Boolean(row.is_pinned),
   }
 }
 
@@ -334,6 +360,14 @@ function migrateLastUserMessageColumn(db: SQLiteDatabase) {
     return
   }
   db.exec('ALTER TABLE agent_sessions ADD COLUMN last_user_message TEXT')
+}
+
+function migrateIsPinnedColumn(db: SQLiteDatabase) {
+  const columns = getColumnNames(db, 'agent_sessions')
+  if (columns.length === 0 || columns.includes('is_pinned')) {
+    return
+  }
+  db.exec('ALTER TABLE agent_sessions ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0')
 }
 
 function migrateDeduplicateDisplayNames(db: SQLiteDatabase) {

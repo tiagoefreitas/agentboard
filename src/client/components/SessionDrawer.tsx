@@ -18,6 +18,7 @@ interface SessionDrawerProps {
   onSelect: (sessionId: string) => void
   onRename: (sessionId: string, newName: string) => void
   onResume?: (sessionId: string) => void
+  onSetPinned?: (sessionId: string, isPinned: boolean) => void
   onNewSession: () => void
   loading: boolean
   error: string | null
@@ -32,6 +33,7 @@ export default function SessionDrawer({
   onSelect,
   onRename,
   onResume,
+  onSetPinned,
   onNewSession,
   loading,
   error,
@@ -147,6 +149,7 @@ export default function SessionDrawer({
           onSelect={handleSelect}
           onRename={onRename}
           onResume={onResume}
+          onSetPinned={onSetPinned}
           loading={loading}
           error={error}
         />
