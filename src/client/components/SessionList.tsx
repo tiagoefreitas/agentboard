@@ -208,68 +208,48 @@ export default function SessionList({
   const projectFilters = useSettingsStore((state) => state.projectFilters)
   const setProjectFilters = useSettingsStore((state) => state.setProjectFilters)
 
-  // Get exiting sessions from store (sessions being animated out)
+  // Get exiting sessions from store (for kill-failed rollback only)
   const exitingSessions = useSessionStore((state) => state.exitingSessions)
   const clearExitingSession = useSessionStore((state) => state.clearExitingSession)
-  const exitTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const exitCleanupTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
-  // Track the last known sorted position of each session for exit animation positioning
-  const lastSortedOrderRef = useRef<Map<string, number>>(new Map())
-
-  // Track which session IDs are currently exiting (for disabling sortable)
-  const exitingIds = useMemo(() => {
-    const currentIds = new Set(sessions.map((s) => s.id))
-    return new Set(
-      Array.from(exitingSessions.keys()).filter((id) => !currentIds.has(id))
-    )
-  }, [sessions, exitingSessions])
-
-  // Clear exiting sessions after exit animation completes without resetting on frequent updates
+  // Clear exitingSessions:
+  // - Immediately if session comes back (kill failed/rolled back)
+  // - After animation delay if session was removed (cleanup stale entries)
   useEffect(() => {
     const currentIds = new Set(sessions.map((s) => s.id))
-    const exitingIdSet = new Set(exitingSessions.keys())
 
-    for (const id of exitingIdSet) {
-      if (currentIds.has(id) || exitTimersRef.current.has(id)) {
-        continue
-      }
-      const timer = setTimeout(() => {
+    for (const id of exitingSessions.keys()) {
+      if (currentIds.has(id)) {
+        // Session is back in active list (kill failed) - clear immediately
+        // Also cancel any pending cleanup timer
+        const timer = exitCleanupTimers.current.get(id)
+        if (timer) {
+          clearTimeout(timer)
+          exitCleanupTimers.current.delete(id)
+        }
         clearExitingSession(id)
-        exitTimersRef.current.delete(id)
-      }, EXIT_DURATION + 50)
-      exitTimersRef.current.set(id, timer)
-    }
-
-    for (const [id, timer] of exitTimersRef.current) {
-      if (!exitingIdSet.has(id) || currentIds.has(id)) {
-        clearTimeout(timer)
-        exitTimersRef.current.delete(id)
+      } else if (!exitCleanupTimers.current.has(id)) {
+        // Session is gone and no cleanup scheduled - schedule cleanup after animation
+        const timer = setTimeout(() => {
+          exitCleanupTimers.current.delete(id)
+          clearExitingSession(id)
+        }, EXIT_DURATION + 100)
+        exitCleanupTimers.current.set(id, timer)
       }
     }
   }, [sessions, exitingSessions, clearExitingSession, EXIT_DURATION])
 
+  // Cleanup timers on unmount
   useEffect(() => {
     return () => {
-      for (const timer of exitTimersRef.current.values()) {
+      for (const timer of exitCleanupTimers.current.values()) {
         clearTimeout(timer)
       }
-      exitTimersRef.current.clear()
+      exitCleanupTimers.current.clear()
     }
   }, [])
 
-  // Filter inactive sessions to exclude any still exiting from active list
-  const inactiveSessionsWithoutExiting = useMemo(() => {
-    if (exitingSessions.size === 0) return inactiveSessions
-    // Get agent session IDs of exiting sessions
-    const exitingAgentIds = new Set(
-      Array.from(exitingSessions.values())
-        .map((s) => s.agentSessionId?.trim())
-        .filter(Boolean)
-    )
-    return inactiveSessions.filter(
-      (s) => !exitingAgentIds.has(s.sessionId)
-    )
-  }, [inactiveSessions, exitingSessions])
 
   // Clean up manualSessionOrder when sessions are removed
   useEffect(() => {
@@ -298,50 +278,9 @@ export default function SessionList({
     [sessions, sessionSortMode, sessionSortDirection, manualSessionOrder]
   )
 
-  // Persist last committed order for exit positioning
-  useEffect(() => {
-    const activeIds = new Set(sortedActive.map((session) => session.id))
-    for (const [idx, session] of sortedActive.entries()) {
-      lastSortedOrderRef.current.set(session.id, idx)
-    }
-    for (const id of lastSortedOrderRef.current.keys()) {
-      if (!activeIds.has(id) && !exitingSessions.has(id)) {
-        lastSortedOrderRef.current.delete(id)
-      }
-    }
-  }, [sortedActive, exitingSessions])
-
-  // Compute sorted sessions with exiting sessions at their original positions
-  const sortedSessions = useMemo(() => {
-    const activeIds = new Set(sortedActive.map((s) => s.id))
-    // Get exiting sessions that are no longer in the active list
-    const exitingArray = Array.from(exitingSessions.values()).filter(
-      (s) => !activeIds.has(s.id)
-    )
-
-    if (exitingArray.length === 0) {
-      return sortedActive
-    }
-
-    // Insert exiting sessions at their last known positions
-    const result = [...sortedActive]
-    const exitingWithPos = exitingArray
-      .map((s) => ({
-        session: s,
-        lastIndex: lastSortedOrderRef.current.get(s.id) ?? result.length,
-      }))
-      .sort((a, b) => a.lastIndex - b.lastIndex)
-
-    // Insert in order, adjusting indices as we go
-    let offset = 0
-    for (const { session, lastIndex } of exitingWithPos) {
-      const insertAt = Math.min(lastIndex + offset, result.length)
-      result.splice(insertAt, 0, session)
-      offset++
-    }
-
-    return result
-  }, [sortedActive, exitingSessions])
+  // Don't add exiting sessions back to the list - let AnimatePresence handle
+  // the exit animation naturally. This prevents the 250ms delay before animation starts.
+  const sortedSessions = sortedActive
 
   const uniqueProjects = useMemo(
     () => getUniqueProjects(sessions, inactiveSessions),
@@ -387,11 +326,11 @@ export default function SessionList({
   }, [filteredSessions, newlyActiveIds])
 
   const filteredInactiveSessions = useMemo(() => {
-    if (projectFilters.length === 0) return inactiveSessionsWithoutExiting
-    return inactiveSessionsWithoutExiting.filter(
+    if (projectFilters.length === 0) return inactiveSessions
+    return inactiveSessions.filter(
       (session) => projectFilters.includes(session.projectPath)
     )
-  }, [inactiveSessionsWithoutExiting, projectFilters])
+  }, [inactiveSessions, projectFilters])
 
   const hiddenPermissionCount = useMemo(() => {
     if (projectFilters.length === 0) return 0
@@ -566,19 +505,15 @@ export default function SessionList({
             onDragEnd={handleDragEnd}
             onDragCancel={handleDragCancel}
           >
-            {/* Exclude exiting sessions from SortableContext to prevent useSortable interference */}
             <SortableContext
-              items={filteredSessions.filter((s) => !exitingIds.has(s.id)).map((s) => s.id)}
+              items={filteredSessions.map((s) => s.id)}
               strategy={verticalListSortingStrategy}
             >
               <div key={filterKey}>
-                <AnimatePresence initial={false} mode="popLayout">
+                <AnimatePresence initial={false}>
                   {filteredSessions.map((session, index) => {
                     const isTrulyNew = newlyActiveIds.has(session.id)
                     const isFilteredIn = newlyFilteredInIds.has(session.id)
-                    // No delay for entry animations - animate immediately
-                    const entryDelay = 0
-                    const isExiting = exitingIds.has(session.id)
                     // Calculate drop indicator position
                     const activeIndex = activeId
                       ? filteredSessions.findIndex((s) => s.id === activeId)
@@ -592,8 +527,6 @@ export default function SessionList({
                         key={session.id}
                         session={session}
                         isNew={isNew}
-                        isExiting={isExiting}
-                        entryDelay={entryDelay}
                         exitDuration={EXIT_DURATION}
                         prefersReducedMotion={prefersReducedMotion}
                         layoutAnimationsDisabled={layoutAnimationsDisabled}
@@ -721,8 +654,6 @@ export default function SessionList({
 interface SortableSessionItemProps {
   session: Session
   isNew: boolean
-  isExiting: boolean
-  entryDelay: number
   exitDuration: number
   prefersReducedMotion: boolean | null
   layoutAnimationsDisabled: boolean
@@ -744,8 +675,6 @@ interface SortableSessionItemProps {
 const SortableSessionItem = forwardRef<HTMLDivElement, SortableSessionItemProps>(function SortableSessionItem({
   session,
   isNew,
-  isExiting,
-  entryDelay,
   exitDuration,
   prefersReducedMotion,
   layoutAnimationsDisabled,
@@ -772,14 +701,12 @@ const SortableSessionItem = forwardRef<HTMLDivElement, SortableSessionItemProps>
     isDragging,
   } = useSortable({
     id: session.id,
-    disabled: isExiting,
     animateLayoutChanges: ({ isSorting, wasDragging }) => isSorting || wasDragging,
   })
 
-  // Don't apply sortable transforms for exiting items
   const dndTransform = CSS.Transform.toString(transform)
   const shouldApplyStyleTransform = Boolean(prefersReducedMotion && dndTransform)
-  const style = isExiting ? undefined : {
+  const style = {
     ...(shouldApplyStyleTransform ? { transform: dndTransform, transition } : {}),
     zIndex: isDragging ? 10 : undefined,
     opacity: isDragging ? 0.9 : undefined,
@@ -787,16 +714,14 @@ const SortableSessionItem = forwardRef<HTMLDivElement, SortableSessionItemProps>
 
   const setRefs = useCallback(
     (node: HTMLDivElement | null) => {
-      if (!isExiting) {
-        setNodeRef(node)
-      }
+      setNodeRef(node)
       if (typeof ref === 'function') {
         ref(node)
       } else if (ref) {
         ref.current = node
       }
     },
-    [isExiting, setNodeRef, ref],
+    [setNodeRef, ref],
   )
 
   return (
@@ -804,7 +729,7 @@ const SortableSessionItem = forwardRef<HTMLDivElement, SortableSessionItemProps>
       ref={setRefs}
       style={{ ...style, overflow: 'hidden' }}
       className="relative"
-      layout={!prefersReducedMotion && !isDragging && !layoutAnimationsDisabled && !isExiting && !isNew}
+      layout={!prefersReducedMotion && !isDragging && !layoutAnimationsDisabled && !isNew}
       transformTemplate={(_, generatedTransform) => {
         if (!dndTransform) return generatedTransform
         if (!generatedTransform || generatedTransform === 'none') return dndTransform
@@ -820,16 +745,13 @@ const SortableSessionItem = forwardRef<HTMLDivElement, SortableSessionItemProps>
       }
       exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, height: 0, scale: 0.97 }}
       transition={prefersReducedMotion ? { duration: 0 } : {
-        // Layout should respond immediately to reflow, not wait for entry delay
         layout: { type: 'spring', stiffness: 500, damping: 35 },
-        opacity: { duration: exitDuration / 1000, delay: isExiting ? 0 : entryDelay },
-        scale: { duration: 0.3, ease: [0.34, 1.56, 0.64, 1], delay: isExiting ? 0 : entryDelay },
-        ...(isExiting
-          ? { height: { duration: exitDuration / 1000, ease: 'easeOut' } }
-          : {}),
+        opacity: { duration: exitDuration / 1000 },
+        scale: { duration: exitDuration / 1000, ease: [0.34, 1.56, 0.64, 1] },
+        height: { duration: exitDuration / 1000, ease: 'easeOut' },
       }}
-      {...(isExiting ? {} : attributes)}
-      {...(isExiting ? {} : listeners)}
+      {...attributes}
+      {...listeners}
     >
       {/* Drop indicator line */}
       {dropIndicator === 'above' && (
