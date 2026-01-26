@@ -29,6 +29,7 @@ if (!tmuxAvailable) {
       os.tmpdir(),
       `agentboard-pin-${process.pid}-${Date.now()}.db`
     )
+    const projectPath = process.cwd()
     let serverProcess: ReturnType<typeof Bun.spawn> | null = null
     let port = 0
     const originalTmuxTmpDir = process.env.TMUX_TMPDIR
@@ -86,7 +87,7 @@ if (!tmuxAvailable) {
       db.insertSession({
         sessionId: wsTestSessionId,
         logFilePath: `/tmp/ws-${wsTestSessionId}.jsonl`,
-        projectPath: os.tmpdir(),
+        projectPath,
         agentType: 'claude',
         displayName: 'ws-pin-test',
         createdAt: new Date().toISOString(),
@@ -140,7 +141,7 @@ if (!tmuxAvailable) {
       db.insertSession({
         sessionId: resurrectSessionId,
         logFilePath: `/tmp/${resurrectSessionId}.jsonl`,
-        projectPath: os.tmpdir(),
+        projectPath,
         agentType: 'claude',
         displayName: 'pin-resurrect',
         createdAt: new Date().toISOString(),

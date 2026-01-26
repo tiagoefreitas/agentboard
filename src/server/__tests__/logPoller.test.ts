@@ -19,11 +19,12 @@ const originalSpawnSync = bunAny.spawnSync
 
 const tmuxOutputs = new Map<string, string>()
 
+const baseProjectPath = path.join(process.cwd(), 'fixtures', 'alpha')
 const baseSession: Session = {
   id: 'window-1',
   name: 'alpha',
   tmuxWindow: 'agentboard:1',
-  projectPath: '/tmp/alpha',
+  projectPath: baseProjectPath,
   status: 'waiting',
   lastActivity: new Date().toISOString(),
   createdAt: new Date().toISOString(),
