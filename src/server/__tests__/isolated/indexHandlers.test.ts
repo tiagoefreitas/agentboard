@@ -1,5 +1,9 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test, mock } from 'bun:test'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import type { Session, ServerMessage } from '@shared/types'
+import type { AgentSessionRecord } from '../../db'
 
 const bunAny = Bun as typeof Bun & {
   serve: typeof Bun.serve
@@ -25,6 +29,69 @@ let serveOptions: Parameters<typeof Bun.serve>[0] | null = null
 let spawnSyncImpl: typeof Bun.spawnSync
 let writeImpl: typeof Bun.write
 let replaceSessionsCalls: Session[][] = []
+let dbState: {
+  records: Map<string, AgentSessionRecord>
+  nextId: number
+  updateCalls: Array<{ sessionId: string; patch: Partial<AgentSessionRecord> }>
+  setPinnedCalls: Array<{ sessionId: string; isPinned: boolean }>
+}
+
+const defaultConfig = {
+  port: 4040,
+  hostname: '0.0.0.0',
+  refreshIntervalMs: 1000,
+  tmuxSession: 'agentboard',
+  discoverPrefixes: [],
+  pruneWsSessions: true,
+  terminalMode: 'pty',
+  terminalMonitorTargets: true,
+  tlsCert: '',
+  tlsKey: '',
+  rgThreads: 1,
+  logMatchWorker: false,
+  logMatchProfile: false,
+  claudeResumeCmd: 'claude --resume {sessionId}',
+  codexResumeCmd: 'codex resume {sessionId}',
+}
+
+const configState = { ...defaultConfig }
+const baseRecordTimestamp = new Date('2026-01-01T00:00:00.000Z').toISOString()
+
+function resetDbState() {
+  dbState = {
+    records: new Map(),
+    nextId: 1,
+    updateCalls: [],
+    setPinnedCalls: [],
+  }
+}
+
+function makeRecord(overrides: Partial<AgentSessionRecord> = {}): AgentSessionRecord {
+  const id = overrides.id ?? dbState.nextId++
+  const sessionId = overrides.sessionId ?? `session-${id}`
+  const logFilePath =
+    overrides.logFilePath ?? path.join('/tmp', `${sessionId}.jsonl`)
+
+  return {
+    id,
+    sessionId,
+    logFilePath,
+    projectPath: '/tmp/project',
+    agentType: 'claude',
+    displayName: 'alpha',
+    createdAt: baseRecordTimestamp,
+    lastActivityAt: baseRecordTimestamp,
+    lastUserMessage: null,
+    currentWindow: null,
+    isPinned: false,
+    lastResumeError: null,
+    ...overrides,
+  }
+}
+
+function seedRecord(record: AgentSessionRecord) {
+  dbState.records.set(record.sessionId, record)
+}
 
 let sessionManagerState: {
   listWindows: () => Session[]
@@ -89,6 +156,15 @@ class SessionRegistryMock {
 
   get(id: string) {
     return this.sessions.find((session) => session.id === id)
+  }
+
+  updateSession(id: string, patch: Partial<Session>) {
+    const index = this.sessions.findIndex((session) => session.id === id)
+    if (index === -1) return undefined
+    const updated = { ...this.sessions[index], ...patch }
+    this.sessions[index] = updated
+    this.emit('session-update', updated)
+    return updated
   }
 
   on(event: string, listener: (payload: unknown) => void) {
@@ -174,23 +250,76 @@ class TerminalProxyMock {
 }
 
 mock.module('../../config', () => ({
-  config: {
-    port: 4040,
-    hostname: '0.0.0.0',
-    refreshIntervalMs: 1000,
-    tmuxSession: 'agentboard',
-    discoverPrefixes: [],
-    pruneWsSessions: true,
-    terminalMode: 'pty',
-    terminalMonitorTargets: true,
-    tlsCert: '',
-    tlsKey: '',
-    rgThreads: 1,
-    logMatchWorker: false,
-    logMatchProfile: false,
-    claudeResumeCmd: 'claude --resume {sessionId}',
-    codexResumeCmd: 'codex resume {sessionId}',
-  },
+  config: configState,
+}))
+mock.module('../../db', () => ({
+  initDatabase: () => ({
+    getSessionById: (sessionId: string) => dbState.records.get(sessionId) ?? null,
+    getSessionByLogPath: (logFilePath: string) =>
+      Array.from(dbState.records.values()).find(
+        (record) => record.logFilePath === logFilePath
+      ) ?? null,
+    getSessionByWindow: (tmuxWindow: string) =>
+      Array.from(dbState.records.values()).find(
+        (record) => record.currentWindow === tmuxWindow
+      ) ?? null,
+    getActiveSessions: () =>
+      Array.from(dbState.records.values()).filter(
+        (record) => record.currentWindow !== null
+      ),
+    getInactiveSessions: (options?: { maxAgeHours?: number }) => {
+      const inactive = Array.from(dbState.records.values()).filter(
+        (record) => record.currentWindow === null
+      )
+      if (!options?.maxAgeHours) {
+        return inactive
+      }
+      const cutoff = Date.now() - options.maxAgeHours * 60 * 60 * 1000
+      return inactive.filter(
+        (record) => new Date(record.lastActivityAt).getTime() > cutoff
+      )
+    },
+    orphanSession: (sessionId: string) => {
+      const record = dbState.records.get(sessionId)
+      if (!record) return null
+      const updated = { ...record, currentWindow: null }
+      dbState.records.set(sessionId, updated)
+      return updated
+    },
+    updateSession: (
+      sessionId: string,
+      patch: Partial<Omit<AgentSessionRecord, 'id' | 'sessionId'>>
+    ) => {
+      const record = dbState.records.get(sessionId)
+      if (!record) return null
+      const updated = { ...record, ...patch }
+      dbState.records.set(sessionId, updated)
+      dbState.updateCalls.push({
+        sessionId,
+        patch: patch as Partial<AgentSessionRecord>,
+      })
+      return updated
+    },
+    displayNameExists: (displayName: string, excludeSessionId?: string) =>
+      Array.from(dbState.records.values()).some(
+        (record) =>
+          record.displayName === displayName &&
+          record.sessionId !== excludeSessionId
+      ),
+    setPinned: (sessionId: string, isPinned: boolean) => {
+      dbState.setPinnedCalls.push({ sessionId, isPinned })
+      const record = dbState.records.get(sessionId)
+      if (!record) return null
+      const updated = { ...record, isPinned }
+      dbState.records.set(sessionId, updated)
+      return updated
+    },
+    getPinnedOrphaned: () =>
+      Array.from(dbState.records.values()).filter(
+        (record) => record.isPinned && record.currentWindow === null
+      ),
+    close: () => {},
+  }),
 }))
 mock.module('../../SessionManager', () => ({
   SessionManager: SessionManagerMock,
@@ -232,6 +361,7 @@ function createWs() {
     data: {
       terminal: null as TerminalProxyMock | null,
       currentSessionId: null as string | null,
+      currentTmuxTarget: null as string | null,
       connectionId: 'ws-test',
     },
     send: (payload: string) => {
@@ -268,6 +398,8 @@ beforeEach(() => {
   TerminalProxyMock.instances = []
   SessionManagerMock.instance = null
   SessionRegistryMock.instance = null
+  resetDbState()
+  Object.assign(configState, defaultConfig)
   sessionManagerState = {
     listWindows: () => [],
     createWindow: () => ({ ...baseSession, id: 'created' }),
@@ -618,6 +750,329 @@ describe('server message handlers', () => {
     expect(outputCountAfter).toBe(outputCount)
   })
 
+  test('validates tmux target on terminal attach', async () => {
+    const { serveOptions, registryInstance } = await loadIndex()
+    registryInstance.sessions = [baseSession]
+
+    const { ws, sent } = createWs()
+    const websocket = serveOptions.websocket
+    if (!websocket) {
+      throw new Error('WebSocket handlers not configured')
+    }
+
+    websocket.message?.(
+      ws as never,
+      JSON.stringify({
+        type: 'terminal-attach',
+        sessionId: baseSession.id,
+        tmuxTarget: 'bad target',
+      })
+    )
+
+    expect(sent[sent.length - 1]).toEqual({
+      type: 'terminal-error',
+      sessionId: baseSession.id,
+      code: 'ERR_INVALID_WINDOW',
+      message: 'Invalid tmux target',
+      retryable: false,
+    })
+  })
+
+  test('handles copy-mode commands for active session', async () => {
+    const { serveOptions, registryInstance } = await loadIndex()
+    registryInstance.sessions = [baseSession]
+
+    const { ws, sent } = createWs()
+    ws.data.currentSessionId = baseSession.id
+    ws.data.currentTmuxTarget = 'agentboard:1.1'
+
+    let sendKeysTarget = ''
+    let displayTarget = ''
+    spawnSyncImpl = ((...args: Parameters<typeof Bun.spawnSync>) => {
+      const command = Array.isArray(args[0]) ? args[0] : [String(args[0])]
+      if (command[0] === 'tmux' && command[1] === 'send-keys') {
+        sendKeysTarget = command[4] ?? ''
+      }
+      if (command[0] === 'tmux' && command[1] === 'display-message') {
+        displayTarget = command[4] ?? ''
+        return {
+          exitCode: 0,
+          stdout: Buffer.from('1\n'),
+          stderr: Buffer.from(''),
+        } as ReturnType<typeof Bun.spawnSync>
+      }
+      return {
+        exitCode: 0,
+        stdout: Buffer.from(''),
+        stderr: Buffer.from(''),
+      } as ReturnType<typeof Bun.spawnSync>
+    }) as typeof Bun.spawnSync
+
+    const websocket = serveOptions.websocket
+    if (!websocket) {
+      throw new Error('WebSocket handlers not configured')
+    }
+
+    websocket.message?.(
+      ws as never,
+      JSON.stringify({ type: 'tmux-cancel-copy-mode', sessionId: baseSession.id })
+    )
+    websocket.message?.(
+      ws as never,
+      JSON.stringify({ type: 'tmux-check-copy-mode', sessionId: baseSession.id })
+    )
+
+    expect(sendKeysTarget).toBe('agentboard:1.1')
+    expect(displayTarget).toBe('agentboard:1.1')
+
+    const statusMessage = sent.find(
+      (message) => message.type === 'tmux-copy-mode-status'
+    )
+    expect(statusMessage).toEqual({
+      type: 'tmux-copy-mode-status',
+      sessionId: baseSession.id,
+      inCopyMode: true,
+    })
+  })
+
+  test('pins and unpins sessions with validation', async () => {
+    const { serveOptions, registryInstance } = await loadIndex()
+    registryInstance.sessions = [{ ...baseSession, agentSessionId: baseSession.id }]
+    seedRecord(
+      makeRecord({
+        sessionId: baseSession.id,
+        currentWindow: baseSession.tmuxWindow,
+      })
+    )
+
+    const { ws, sent } = createWs()
+    const websocket = serveOptions.websocket
+    if (!websocket) {
+      throw new Error('WebSocket handlers not configured')
+    }
+
+    websocket.message?.(
+      ws as never,
+      JSON.stringify({
+        type: 'session-pin',
+        sessionId: baseSession.id,
+        isPinned: 'yes',
+      })
+    )
+    expect(sent[sent.length - 1]).toEqual({
+      type: 'session-pin-result',
+      sessionId: baseSession.id,
+      ok: false,
+      error: 'isPinned must be a boolean',
+    })
+
+    websocket.message?.(
+      ws as never,
+      JSON.stringify({
+        type: 'session-pin',
+        sessionId: 'bad id',
+        isPinned: true,
+      })
+    )
+    expect(sent[sent.length - 1]).toEqual({
+      type: 'session-pin-result',
+      sessionId: 'bad id',
+      ok: false,
+      error: 'Invalid session id',
+    })
+
+    websocket.message?.(
+      ws as never,
+      JSON.stringify({
+        type: 'session-pin',
+        sessionId: 'missing',
+        isPinned: true,
+      })
+    )
+    expect(sent[sent.length - 1]).toEqual({
+      type: 'session-pin-result',
+      sessionId: 'missing',
+      ok: false,
+      error: 'Session not found',
+    })
+
+    websocket.message?.(
+      ws as never,
+      JSON.stringify({
+        type: 'session-pin',
+        sessionId: baseSession.id,
+        isPinned: true,
+      })
+    )
+    expect(sent[sent.length - 1]).toEqual({
+      type: 'session-pin-result',
+      sessionId: baseSession.id,
+      ok: true,
+    })
+    expect(dbState.updateCalls).toHaveLength(1)
+    expect(dbState.updateCalls[0]?.patch).toMatchObject({
+      isPinned: true,
+      lastResumeError: null,
+    })
+    expect(registryInstance.sessions[0]?.isPinned).toBe(true)
+
+    websocket.message?.(
+      ws as never,
+      JSON.stringify({
+        type: 'session-pin',
+        sessionId: baseSession.id,
+        isPinned: false,
+      })
+    )
+    expect(sent[sent.length - 1]).toEqual({
+      type: 'session-pin-result',
+      sessionId: baseSession.id,
+      ok: true,
+    })
+    expect(dbState.setPinnedCalls).toEqual([
+      { sessionId: baseSession.id, isPinned: false },
+    ])
+    expect(registryInstance.sessions[0]?.isPinned).toBe(false)
+  })
+
+  test('validates session resume errors', async () => {
+    const { serveOptions } = await loadIndex()
+    const { ws, sent } = createWs()
+    const websocket = serveOptions.websocket
+    if (!websocket) {
+      throw new Error('WebSocket handlers not configured')
+    }
+
+    websocket.message?.(
+      ws as never,
+      JSON.stringify({ type: 'session-resume', sessionId: 'bad id' })
+    )
+    expect(sent[sent.length - 1]).toEqual({
+      type: 'session-resume-result',
+      sessionId: 'bad id',
+      ok: false,
+      error: { code: 'NOT_FOUND', message: 'Invalid session id' },
+    })
+
+    websocket.message?.(
+      ws as never,
+      JSON.stringify({ type: 'session-resume', sessionId: 'missing' })
+    )
+    expect(sent[sent.length - 1]).toEqual({
+      type: 'session-resume-result',
+      sessionId: 'missing',
+      ok: false,
+      error: { code: 'NOT_FOUND', message: 'Session not found' },
+    })
+
+    seedRecord(
+      makeRecord({
+        sessionId: 'active-session',
+        currentWindow: 'agentboard:9',
+      })
+    )
+    websocket.message?.(
+      ws as never,
+      JSON.stringify({ type: 'session-resume', sessionId: 'active-session' })
+    )
+    expect(sent[sent.length - 1]).toEqual({
+      type: 'session-resume-result',
+      sessionId: 'active-session',
+      ok: false,
+      error: { code: 'ALREADY_ACTIVE', message: 'Session is already active' },
+    })
+
+    configState.claudeResumeCmd = 'claude --resume'
+    seedRecord(
+      makeRecord({
+        sessionId: 'bad-template',
+        currentWindow: null,
+        agentType: 'claude',
+      })
+    )
+    websocket.message?.(
+      ws as never,
+      JSON.stringify({ type: 'session-resume', sessionId: 'bad-template' })
+    )
+    expect(sent[sent.length - 1]).toEqual({
+      type: 'session-resume-result',
+      sessionId: 'bad-template',
+      ok: false,
+      error: {
+        code: 'RESUME_FAILED',
+        message: 'Resume command template missing {sessionId} placeholder',
+      },
+    })
+  })
+
+  test('resumes sessions and broadcasts activation', async () => {
+    const { serveOptions, registryInstance } = await loadIndex()
+    const { ws, sent } = createWs()
+    const websocket = serveOptions.websocket
+    if (!websocket) {
+      throw new Error('WebSocket handlers not configured')
+    }
+    websocket.open?.(ws as never)
+
+    const record = makeRecord({
+      sessionId: 'resume-ok',
+      displayName: 'resume',
+      projectPath: '/tmp/resume',
+      agentType: 'claude',
+      currentWindow: null,
+    })
+    seedRecord(record)
+
+    let createArgs: { projectPath: string; name?: string; command?: string } | null = null
+    const createdSession: Session = {
+      ...baseSession,
+      id: 'created-session',
+      name: 'resume',
+      tmuxWindow: 'agentboard:99',
+    }
+    sessionManagerState.createWindow = (projectPath, name, command) => {
+      createArgs = { projectPath, name, command }
+      return createdSession
+    }
+
+    websocket.message?.(
+      ws as never,
+      JSON.stringify({ type: 'session-resume', sessionId: 'resume-ok' })
+    )
+
+    expect(createArgs).not.toBeNull()
+    expect(createArgs!).toEqual({
+      projectPath: '/tmp/resume',
+      name: 'resume',
+      command: 'claude --resume resume-ok',
+    })
+    expect(dbState.updateCalls[0]?.patch).toMatchObject({
+      currentWindow: createdSession.tmuxWindow,
+      displayName: createdSession.name,
+      lastResumeError: null,
+    })
+
+    const resumeMessage = sent.find(
+      (message) => message.type === 'session-resume-result' && message.ok
+    )
+    expect(resumeMessage).toEqual({
+      type: 'session-resume-result',
+      sessionId: 'resume-ok',
+      ok: true,
+      session: createdSession,
+    })
+
+    const activatedMessage = sent.find(
+      (message) => message.type === 'session-activated'
+    )
+    expect(activatedMessage).toMatchObject({
+      type: 'session-activated',
+      window: createdSession.tmuxWindow,
+    })
+
+    expect(registryInstance.sessions[0]?.id).toBe(createdSession.id)
+  })
+
   test('websocket close disposes all terminals', async () => {
     const { serveOptions } = await loadIndex()
     const websocket = serveOptions.websocket
@@ -889,6 +1344,87 @@ describe('server fetch handlers', () => {
     expect(response.status).toBe(500)
     const payload = (await response.json()) as { error: string }
     expect(payload.error).toBe('write-failed')
+  })
+
+  test('returns session preview for existing logs', async () => {
+    const { serveOptions } = await loadIndex()
+    const fetchHandler = serveOptions.fetch
+    if (!fetchHandler) {
+      throw new Error('Fetch handler not configured')
+    }
+
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agentboard-preview-'))
+    const logPath = path.join(tempDir, 'session.jsonl')
+    const lines = Array.from({ length: 120 }, (_, index) => `line-${index}`)
+    await fs.writeFile(logPath, lines.join('\n'))
+
+    seedRecord(
+      makeRecord({
+        sessionId: 'session-preview',
+        logFilePath: logPath,
+        displayName: 'Preview',
+        projectPath: '/tmp/preview',
+        agentType: 'codex',
+      })
+    )
+
+    try {
+      const response = await fetchHandler.call(
+        {} as Bun.Server<unknown>,
+        new Request('http://localhost/api/session-preview/session-preview'),
+        {} as Bun.Server<unknown>
+      )
+
+      if (!response) {
+        throw new Error('Expected response for session preview')
+      }
+
+      expect(response.ok).toBe(true)
+      const payload = (await response.json()) as {
+        sessionId: string
+        displayName: string
+        projectPath: string
+        agentType: string
+        lines: string[]
+      }
+      expect(payload.sessionId).toBe('session-preview')
+      expect(payload.displayName).toBe('Preview')
+      expect(payload.projectPath).toBe('/tmp/preview')
+      expect(payload.agentType).toBe('codex')
+      expect(payload.lines).toHaveLength(100)
+      expect(payload.lines[0]).toBe('line-20')
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  test('returns 404 when session preview log is missing', async () => {
+    const { serveOptions } = await loadIndex()
+    const fetchHandler = serveOptions.fetch
+    if (!fetchHandler) {
+      throw new Error('Fetch handler not configured')
+    }
+
+    seedRecord(
+      makeRecord({
+        sessionId: 'missing-log',
+        logFilePath: path.join('/tmp', 'missing-log.jsonl'),
+      })
+    )
+
+    const response = await fetchHandler.call(
+      {} as Bun.Server<unknown>,
+      new Request('http://localhost/api/session-preview/missing-log'),
+      {} as Bun.Server<unknown>
+    )
+
+    if (!response) {
+      throw new Error('Expected response for missing log')
+    }
+
+    expect(response.status).toBe(404)
+    const payload = (await response.json()) as { error: string }
+    expect(payload.error).toBe('Log file not found')
   })
 })
 
