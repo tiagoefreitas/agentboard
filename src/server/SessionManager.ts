@@ -36,6 +36,7 @@ type CapturePane = (tmuxWindow: string) => PaneCapture | null
 interface PaneCache {
   content: string
   lastChanged: number
+  hasEverChanged: boolean
   width: number
   height: number
 }
@@ -466,9 +467,16 @@ function inferStatus(
       contentChanged = cached.content !== content
     }
   }
+  const hasEverChanged = contentChanged || cached?.hasEverChanged === true
   const lastChanged = contentChanged ? now() : (cached?.lastChanged ?? now())
 
-  paneContentCache.set(tmuxWindow, { content, width, height, lastChanged })
+  paneContentCache.set(tmuxWindow, {
+    content,
+    width,
+    height,
+    lastChanged,
+    hasEverChanged,
+  })
 
   const hasPermissionPrompt = detectsPermissionPrompt(content)
 
@@ -486,7 +494,14 @@ function inferStatus(
     return { status: 'permission', lastChanged }
   }
 
-  // If content did not change, it's waiting
+  // Grace period: stay "working" if content changed recently
+  // This prevents status flicker during Claude's micro-pauses
+  const timeSinceLastChange = now() - lastChanged
+  if (hasEverChanged && timeSinceLastChange < config.workingGracePeriodMs) {
+    return { status: 'working', lastChanged }
+  }
+
+  // Content unchanged and grace period expired
   return { status: 'waiting', lastChanged }
 }
 

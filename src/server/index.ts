@@ -31,6 +31,10 @@ import type {
 } from '../shared/types'
 import { logger } from './logger'
 import { SessionRefreshWorkerClient } from './sessionRefreshWorkerClient'
+import {
+  setForceWorkingUntil,
+  applyForceWorkingOverrides,
+} from './forceWorkingStatus'
 
 function checkPortAvailable(port: number): void {
   let result: ReturnType<typeof Bun.spawnSync>
@@ -379,7 +383,8 @@ async function refreshSessionsAsync(): Promise<void> {
       config.discoverPrefixes
     )
     const hydrated = hydrateSessionsWithAgentSessions(sessions)
-    registry.replaceSessions(hydrated)
+    const withOverrides = applyForceWorkingOverrides(hydrated)
+    registry.replaceSessions(withOverrides)
   } catch (error) {
     // Fallback to sync on worker failure
     logger.warn('session_refresh_worker_error', {
@@ -387,7 +392,8 @@ async function refreshSessionsAsync(): Promise<void> {
     })
     const sessions = sessionManager.listWindows()
     const hydrated = hydrateSessionsWithAgentSessions(sessions)
-    registry.replaceSessions(hydrated)
+    const withOverrides = applyForceWorkingOverrides(hydrated)
+    registry.replaceSessions(withOverrides)
   } finally {
     refreshInFlight = false
   }
@@ -407,6 +413,12 @@ function refreshSessionsSync({ verifyAssociations = false } = {}) {
 // Debounced refresh triggered by Enter key in terminal input
 let enterRefreshTimer: Timer | null = null
 const lastUserMessageTimers = new Map<string, Timer>()
+
+function setForceWorking(sessionId: string) {
+  setForceWorkingUntil(sessionId, Date.now() + config.workingGracePeriodMs)
+  // Immediately update registry so UI shows "working" right away
+  registry.updateSession(sessionId, { status: 'working' })
+}
 
 function scheduleEnterRefresh() {
   if (enterRefreshTimer) {
@@ -1408,8 +1420,9 @@ function handleTerminalInputPersistent(
   }
   ws.data.terminal?.write(data)
 
-  // Schedule a quick status refresh after Enter key to catch working/waiting changes
+  // On Enter key: immediately set "working" status and schedule refresh
   if (data.includes('\r') || data.includes('\n')) {
+    setForceWorking(sessionId)
     scheduleEnterRefresh()
     scheduleLastUserMessageCapture(sessionId)
   }

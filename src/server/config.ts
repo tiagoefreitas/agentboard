@@ -32,6 +32,11 @@ const enterRefreshDelayMs = Number.isFinite(enterRefreshDelayMsRaw)
   ? enterRefreshDelayMsRaw
   : 1000
 
+const workingGracePeriodMsRaw = Number(process.env.AGENTBOARD_WORKING_GRACE_MS)
+const workingGracePeriodMs = Number.isFinite(workingGracePeriodMsRaw)
+  ? workingGracePeriodMsRaw
+  : 4000
+
 const claudeConfigDir =
   process.env.CLAUDE_CONFIG_DIR || path.join(homeDir, '.claude')
 const codexHomeDir =
@@ -64,4 +69,5 @@ export const config = {
   claudeResumeCmd: process.env.CLAUDE_RESUME_CMD || 'claude --resume {sessionId}',
   codexResumeCmd: process.env.CODEX_RESUME_CMD || 'codex resume {sessionId}',
   enterRefreshDelayMs,
+  workingGracePeriodMs,
 }

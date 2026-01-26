@@ -315,7 +315,8 @@ describe('sessionRefreshWorker', () => {
       const firstActivity = Date.parse(first.lastActivity)
       expect(first.status).toBe('waiting')
 
-      now += 1000
+      // Advance past the grace period (4000ms) to trigger "waiting" on unchanged content
+      now += 5000
       const second = runRefresh()
       const secondActivity = Date.parse(second.lastActivity)
       expect(second.status).toBe('waiting')
@@ -334,6 +335,80 @@ describe('sessionRefreshWorker', () => {
       expect(fourthActivity).toBe(now)
     } finally {
       Date.now = originalNow
+    }
+  })
+
+  test('status skips grace-period working on first observation', async () => {
+    const originalNow = Date.now
+    const originalGraceEnv = process.env.AGENTBOARD_WORKING_GRACE_MS
+    process.env.AGENTBOARD_WORKING_GRACE_MS = '4000'
+    let now = 1_700_000_000_000
+    Date.now = () => now
+
+    try {
+      await loadWorker('status-first-observation')
+
+      const listOutput = [
+        'agentboard\t1\talpha\t/Users/test/project\t100\t1700000000\tcodex\t80\t24',
+      ].join('\n')
+
+      const captureSequence = ['idle', 'idle']
+      let captureIndex = 0
+
+      bunAny.spawnSync = ((args: string[]) => {
+        if (args[0] === 'tmux' && args[1] === 'list-windows') {
+          return {
+            exitCode: 0,
+            stdout: Buffer.from(listOutput),
+            stderr: Buffer.from(''),
+          } as ReturnType<typeof Bun.spawnSync>
+        }
+        if (args[0] === 'tmux' && args[1] === 'capture-pane') {
+          const output = captureSequence[captureIndex] ?? ''
+          captureIndex += 1
+          return {
+            exitCode: 0,
+            stdout: Buffer.from(output),
+            stderr: Buffer.from(''),
+          } as ReturnType<typeof Bun.spawnSync>
+        }
+        return {
+          exitCode: 0,
+          stdout: Buffer.from(''),
+          stderr: Buffer.from(''),
+        } as ReturnType<typeof Bun.spawnSync>
+      }) as typeof Bun.spawnSync
+
+      const runRefresh = () => {
+        emitMessage({
+          id: `refresh-${now}`,
+          kind: 'refresh',
+          managedSession: 'agentboard',
+          discoverPrefixes: [],
+        })
+        const response = getLastResponse()
+        if (response.type !== 'result' || response.kind !== 'refresh') {
+          throw new Error('Unexpected response type')
+        }
+        return response.sessions[0] as Session
+      }
+
+      const first = runRefresh()
+      const firstActivity = Date.parse(first.lastActivity)
+      expect(first.status).toBe('waiting')
+
+      now += 1000
+      const second = runRefresh()
+      const secondActivity = Date.parse(second.lastActivity)
+      expect(second.status).toBe('waiting')
+      expect(secondActivity).toBe(firstActivity)
+    } finally {
+      Date.now = originalNow
+      if (originalGraceEnv === undefined) {
+        delete process.env.AGENTBOARD_WORKING_GRACE_MS
+      } else {
+        process.env.AGENTBOARD_WORKING_GRACE_MS = originalGraceEnv
+      }
     }
   })
 })

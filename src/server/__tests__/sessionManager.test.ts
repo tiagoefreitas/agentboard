@@ -190,6 +190,62 @@ describe('SessionManager', () => {
     }
   })
 
+  test('listWindows skips grace-period working on first observation', () => {
+    const sessionName = 'agentboard-first-observation'
+    const runner = createTmuxRunner(
+      [
+        {
+          name: sessionName,
+          windows: [
+            {
+              id: '1',
+              index: 1,
+              name: 'alpha',
+              path: '/tmp/alpha',
+              activity: 0,
+              command: 'claude',
+            },
+          ],
+        },
+      ],
+      1
+    )
+
+    const contentSequences = new Map<string, string[]>([
+      [`${sessionName}:1`, ['same', 'same']],
+    ])
+    const capturePaneContent = (tmuxWindow: string) => {
+      const sequence = contentSequences.get(tmuxWindow) ?? ['']
+      const next = sequence.shift() ?? ''
+      contentSequences.set(tmuxWindow, sequence)
+      return makePaneCapture(next)
+    }
+
+    let now = 1700000000000
+    const manager = new SessionManager(sessionName, {
+      runTmux: runner.runTmux,
+      capturePaneContent,
+      now: () => now,
+    })
+
+    const originalPrefixes = config.discoverPrefixes
+    const originalGrace = config.workingGracePeriodMs
+    config.discoverPrefixes = []
+    config.workingGracePeriodMs = 4000
+    try {
+      const first = manager.listWindows()[0]
+      now += Math.max(1, Math.floor(config.workingGracePeriodMs / 2))
+      const second = manager.listWindows()[0]
+
+      expect(first?.status).toBe('waiting')
+      expect(second?.status).toBe('waiting')
+      expect(first?.lastActivity).toBe(second?.lastActivity)
+    } finally {
+      config.discoverPrefixes = originalPrefixes
+      config.workingGracePeriodMs = originalGrace
+    }
+  })
+
   test('listWindows ignores resize-only changes and detects real changes', () => {
     const sessionName = 'agentboard-resize-detection'
     const runner = createTmuxRunner(
@@ -450,16 +506,19 @@ describe('SessionManager', () => {
       return makePaneCapture(next)
     }
 
+    // Advance time past grace period between calls to trigger "waiting" on unchanged content
+    let currentTime = 1700000000000
     const manager = new SessionManager(managedSession, {
       runTmux: runner.runTmux,
       capturePaneContent,
-      now: () => 1700000000000,
+      now: () => currentTime,
     })
 
     const originalPrefixes = config.discoverPrefixes
     config.discoverPrefixes = ['external-']
     try {
       const first = manager.listWindows()
+      currentTime += 5000 // Advance past grace period (4000ms)
       const second = manager.listWindows()
 
       const firstManaged = first.find((session) => session.tmuxWindow === `${managedSession}:1`)

@@ -24,6 +24,13 @@ const BATCH_WINDOW_FORMAT_FALLBACK =
 
 const LAST_USER_MESSAGE_SCROLLBACK_LINES = 200
 
+// Grace period before flipping from "working" to "waiting"
+// Prevents status flicker during Claude's micro-pauses (API calls, thinking)
+const workingGracePeriodMsRaw = Number(process.env.AGENTBOARD_WORKING_GRACE_MS)
+const WORKING_GRACE_PERIOD_MS = Number.isFinite(workingGracePeriodMsRaw)
+  ? workingGracePeriodMsRaw
+  : 4000
+
 interface WindowData {
   sessionName: string
   windowId: string
@@ -39,6 +46,7 @@ interface WindowData {
 interface PaneCache {
   content: string
   lastChanged: number
+  hasEverChanged: boolean
   width: number
   height: number
 }
@@ -287,9 +295,16 @@ function inferStatus(
       contentChanged = cached.content !== content
     }
   }
+  const hasEverChanged = contentChanged || cached?.hasEverChanged === true
   const lastChanged = contentChanged ? now : (cached?.lastChanged ?? now)
 
-  paneContentCache.set(tmuxWindow, { content, width, height, lastChanged })
+  paneContentCache.set(tmuxWindow, {
+    content,
+    width,
+    height,
+    lastChanged,
+    hasEverChanged,
+  })
 
   const hasPermissionPrompt = detectsPermissionPrompt(content)
 
@@ -307,6 +322,13 @@ function inferStatus(
     return { status: 'permission', lastChanged }
   }
 
-  // If content did not change, it's waiting
+  // Grace period: stay "working" if content changed recently
+  // This prevents status flicker during Claude's micro-pauses
+  const timeSinceLastChange = now - lastChanged
+  if (hasEverChanged && timeSinceLastChange < WORKING_GRACE_PERIOD_MS) {
+    return { status: 'working', lastChanged }
+  }
+
+  // Content unchanged and grace period expired
   return { status: 'waiting', lastChanged }
 }
