@@ -1476,7 +1476,8 @@ async function attachTerminalPersistent(
     return
   }
   if (session.remote) {
-    sendTerminalError(ws, sessionId, 'ERR_INVALID_WINDOW', 'Remote sessions are read-only', false)
+    const host = session.host ? ` on ${session.host}` : ''
+    sendTerminalError(ws, sessionId, 'ERR_INVALID_WINDOW', `Remote session${host} is read-only`, false)
     return
   }
 

@@ -248,9 +248,42 @@ function toIsoFromSeconds(value: string | undefined, fallbackMs: number): string
   return new Date(parsed * 1000).toISOString()
 }
 
+/**
+ * Splits SSH options string, respecting quoted arguments.
+ * Handles both single and double quotes.
+ * Example: `-o "ProxyCommand ssh -W %h:%p bastion"` -> ['-o', 'ProxyCommand ssh -W %h:%p bastion']
+ */
 function splitSshOptions(value: string): string[] {
   if (!value.trim()) return []
-  return value.split(/\s+/).map((part) => part.trim()).filter(Boolean)
+  const result: string[] = []
+  let current = ''
+  let inQuote: '"' | "'" | null = null
+
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i]!
+    if (inQuote) {
+      if (char === inQuote) {
+        inQuote = null
+      } else {
+        current += char
+      }
+    } else if (char === '"' || char === "'") {
+      inQuote = char
+    } else if (/\s/.test(char)) {
+      if (current) {
+        result.push(current)
+        current = ''
+      }
+    } else {
+      current += char
+    }
+  }
+
+  if (current) {
+    result.push(current)
+  }
+
+  return result
 }
 
 // Export for testing

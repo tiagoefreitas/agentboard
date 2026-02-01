@@ -165,6 +165,26 @@ describe('splitSshOptions', () => {
     const result = splitSshOptions(' -o  StrictHostKeyChecking=no ')
     expect(result).toEqual(['-o', 'StrictHostKeyChecking=no'])
   })
+
+  test('handles double-quoted arguments with spaces', () => {
+    const result = splitSshOptions('-o "ProxyCommand ssh -W %h:%p bastion"')
+    expect(result).toEqual(['-o', 'ProxyCommand ssh -W %h:%p bastion'])
+  })
+
+  test('handles single-quoted arguments with spaces', () => {
+    const result = splitSshOptions("-o 'ProxyCommand ssh -W %h:%p bastion'")
+    expect(result).toEqual(['-o', 'ProxyCommand ssh -W %h:%p bastion'])
+  })
+
+  test('handles mixed quoted and unquoted arguments', () => {
+    const result = splitSshOptions('-i ~/.ssh/id_rsa -o "ProxyCommand ssh -W %h:%p jump" -o BatchMode=yes')
+    expect(result).toEqual(['-i', '~/.ssh/id_rsa', '-o', 'ProxyCommand ssh -W %h:%p jump', '-o', 'BatchMode=yes'])
+  })
+
+  test('handles multiple quoted arguments', () => {
+    const result = splitSshOptions('-o "Option One" -o "Option Two"')
+    expect(result).toEqual(['-o', 'Option One', '-o', 'Option Two'])
+  })
 })
 
 describe('isValidHostname', () => {
