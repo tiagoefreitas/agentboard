@@ -193,6 +193,16 @@ export function useTerminal({
   const setTmuxCopyMode = useCallback((nextValue: boolean) => {
     if (inTmuxCopyModeRef.current === nextValue) return
     inTmuxCopyModeRef.current = nextValue
+
+    // Disable mouse tracking when entering copy-mode so xterm.js does local selection
+    // instead of generating mouse sequences. When exiting copy-mode, tmux will refresh
+    // and re-enable mouse tracking automatically via its output.
+    const terminal = terminalRef.current
+    if (terminal && nextValue) {
+      // Disable all mouse tracking modes (1000=X10, 1002=button-event, 1003=any-event, 1006=SGR)
+      terminal.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l')
+    }
+
     checkScrollPosition()
   }, [checkScrollPosition])
 
