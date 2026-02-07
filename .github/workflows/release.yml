@@ -13,7 +13,7 @@ jobs:
           - os: macos-latest
             target: bun-darwin-arm64
             artifact: agentboard-darwin-arm64
-          - os: macos-13
+          - os: macos-latest
             target: bun-darwin-x64
             artifact: agentboard-darwin-x64
           - os: ubuntu-latest
@@ -39,7 +39,7 @@ jobs:
         run: bun run build
 
       - name: Build server binary
-        run: bun build src/server/index.ts --compile --outfile ${{ matrix.artifact }}
+        run: bun build src/server/index.ts --compile --target ${{ matrix.target }} --outfile ${{ matrix.artifact }}
 
       - name: Package binary and frontend
         run: |
