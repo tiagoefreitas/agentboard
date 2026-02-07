@@ -53,6 +53,8 @@ try {
     stdio: "inherit",
     env: {
       ...process.env,
+      // Compiled binary can't use pino transports (worker_threads + dynamic require)
+      NODE_ENV: process.env.NODE_ENV || "production",
       // Tell the server where to find dist/client relative to the platform package
       AGENTBOARD_STATIC_DIR: join(packageRoot, "dist", "client"),
     },
