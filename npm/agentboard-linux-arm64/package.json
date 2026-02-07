@@ -9,9 +9,6 @@
   "license": "MIT",
   "os": ["linux"],
   "cpu": ["arm64"],
-  "bin": {
-    "agentboard": "./bin/agentboard"
-  },
   "files": ["bin/agentboard", "dist/client/**"],
   "preferUnplugged": true,
   "engines": {

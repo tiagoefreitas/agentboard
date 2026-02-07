@@ -9,9 +9,6 @@
   "license": "MIT",
   "os": ["darwin"],
   "cpu": ["x64"],
-  "bin": {
-    "agentboard": "./bin/agentboard"
-  },
   "files": ["bin/agentboard", "dist/client/**"],
   "preferUnplugged": true,
   "engines": {
