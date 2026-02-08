@@ -21,7 +21,8 @@ describe('parseTmuxWindows', () => {
 
     expect(sessions).toHaveLength(2)
     expect(sessions[0].id).toBe('remote:remote-host:main:@1')
-    expect(sessions[0].name).toBe('window-name')
+    // External sessions use session name as display name (not window name)
+    expect(sessions[0].name).toBe('main')
     expect(sessions[0].tmuxWindow).toBe('main:0')
     expect(sessions[0].projectPath).toBe('/home/user/project')
     expect(sessions[0].host).toBe('remote-host')
@@ -29,7 +30,7 @@ describe('parseTmuxWindows', () => {
     expect(sessions[0].agentType).toBe('claude')
 
     expect(sessions[1].id).toBe('remote:remote-host:main:@2')
-    expect(sessions[1].name).toBe('editor')
+    expect(sessions[1].name).toBe('main')
     expect(sessions[1].tmuxWindow).toBe('main:1')
   })
 
@@ -43,7 +44,7 @@ describe('parseTmuxWindows', () => {
     const sessions = parseTmuxWindows('host', output, defaultPrefix, noPrefixes)
 
     expect(sessions).toHaveLength(1)
-    expect(sessions[0].name).toBe('window')
+    expect(sessions[0].name).toBe('main')
   })
 
   test('handles empty output', () => {
@@ -63,8 +64,8 @@ describe('parseTmuxWindows', () => {
     const sessions = parseTmuxWindows('host', output, defaultPrefix, noPrefixes)
 
     expect(sessions).toHaveLength(1)
-    // Should fall back to tmuxWindow format when window name is empty
-    expect(sessions[0].name).toBe('session:0')
+    // External sessions use session name as display name
+    expect(sessions[0].name).toBe('session')
     expect(sessions[0].command).toBeUndefined()
   })
 
@@ -98,8 +99,9 @@ describe('parseTmuxWindows', () => {
     const sessions = parseTmuxWindows('host', output, 'agentboard', noPrefixes)
 
     expect(sessions).toHaveLength(2)
-    expect(sessions[0].name).toBe('work')
-    expect(sessions[1].name).toBe('dev-win')
+    // External sessions use session name, not window name
+    expect(sessions[0].name).toBe('my-ws-project')
+    expect(sessions[1].name).toBe('dev')
   })
 
   test('filters proxy sessions with custom tmuxSessionPrefix', () => {
@@ -113,8 +115,9 @@ describe('parseTmuxWindows', () => {
     const sessions = parseTmuxWindows('host', output, 'myboard', noPrefixes)
 
     expect(sessions).toHaveLength(2)
-    expect(sessions[0].name).toBe('proxy2')
-    expect(sessions[1].name).toBe('work')
+    // External sessions use session name
+    expect(sessions[0].name).toBe('agentboard-ws-conn2')
+    expect(sessions[1].name).toBe('main')
   })
 
   test('includes all sessions when discoverPrefixes is empty', () => {
@@ -140,7 +143,8 @@ describe('parseTmuxWindows', () => {
     const sessions = parseTmuxWindows('host', output, 'agentboard', ['dev-', 'billy-'])
 
     expect(sessions).toHaveLength(3)
-    expect(sessions.map(s => s.name)).toEqual(['main-win', 'dev-win', 'billy-win'])
+    // Managed session uses window name; external sessions use session name
+    expect(sessions.map(s => s.name)).toEqual(['main-win', 'dev-project', 'billy-work'])
   })
 
   test('excludes proxy sessions and non-matching sessions together', () => {
@@ -154,7 +158,7 @@ describe('parseTmuxWindows', () => {
     const sessions = parseTmuxWindows('host', output, 'agentboard', ['dev-'])
 
     expect(sessions).toHaveLength(2)
-    expect(sessions.map(s => s.name)).toEqual(['main-win', 'dev-win'])
+    expect(sessions.map(s => s.name)).toEqual(['main-win', 'dev-project'])
   })
 })
 
