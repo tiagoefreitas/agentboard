@@ -1,10 +1,8 @@
 # Agentboard
 
-Web UI for tmux, optimized for agent TUI's (`claude`, `codex`, etc).
+Agentboard is a Web GUI for `tmux` that's optimized for agent TUI's (`claude`, `codex`, etc). A lighter-weight, agent-optimized alternative to Blink, Termux, etc.
 
-Made this because I got sick of using tmux kb shortcuts on my phone, and using Blink.
-
-Run your desktop/server, then connect from your phone or laptop over Tailscale/LAN. Shared workspace across devices.
+Run your desktop/server, then connect from your phone or laptop over Tailscale/LAN. You get a shared workspace across devices.
 
 - iOS Safari mobile experience with:
   - Paste support (including images)
