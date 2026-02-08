@@ -172,7 +172,7 @@ function buildBatchCaptureCommand(sessions: Session[]): string {
       // Group dims + capture; suppress stderr so failures produce empty segments
       return (
         `{ tmux display-message -t ${target} -p '#{pane_width} #{pane_height}'` +
-        ` && tmux capture-pane -t ${target} -p -J; } 2>/dev/null; echo '${PANE_SEPARATOR}';`
+        ` && tmux capture-pane -t ${target} -p -J; } 2>/dev/null; echo ${shellQuote(PANE_SEPARATOR)};`
       )
     })
     .join(' ')
@@ -278,7 +278,7 @@ async function captureRemotePaneStatus(
     }
   }, timeoutMs)
 
-  const [exitCode, stdout] = await Promise.all([
+  const [exitCode, stdout, stderr] = await Promise.all([
     proc.exited,
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -288,7 +288,11 @@ async function captureRemotePaneStatus(
 
   // Don't fail the whole poll if capture fails — sessions keep 'unknown' status
   if (exitCode !== 0) {
-    logger.warn('remote_pane_capture_failed', { host, exitCode })
+    logger.warn('remote_pane_capture_failed', {
+      host,
+      exitCode,
+      stderr: stderr.slice(0, 500),
+    })
     return
   }
 

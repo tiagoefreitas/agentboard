@@ -366,7 +366,7 @@ describe('buildBatchCaptureCommand', () => {
     expect(cmd).toContain('tmux display-message -t main:0')
     expect(cmd).toContain("'#{pane_width} #{pane_height}'")
     expect(cmd).toContain('tmux capture-pane -t main:0 -p -J')
-    expect(cmd).toContain(`echo '${PANE_SEPARATOR}'`)
+    expect(cmd).toContain(`echo ${PANE_SEPARATOR}`)
     expect(cmd).toContain('2>/dev/null')
   })
 
