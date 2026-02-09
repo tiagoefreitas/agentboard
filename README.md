@@ -1,5 +1,10 @@
 # Agentboard
 
+[![CI](https://img.shields.io/github/actions/workflow/status/gbasin/agentboard/ci.yml?branch=master&logo=github)](https://github.com/gbasin/agentboard/actions)
+[![npm](https://img.shields.io/npm/v/@gbasin/agentboard?logo=npm)](https://www.npmjs.com/package/@gbasin/agentboard)
+[![License: MIT](https://img.shields.io/github/license/gbasin/agentboard)](https://github.com/gbasin/agentboard/blob/master/LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+
 Agentboard is a Web GUI for `tmux` that's optimized for agent TUI's (`claude`, `codex`, etc). A lighter-weight, agent-optimized alternative to Blink, Termux, etc.
 
 Run your desktop/server, then connect from your phone or laptop over Tailscale/LAN. You get a shared workspace across devices.
