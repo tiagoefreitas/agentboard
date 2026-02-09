@@ -118,7 +118,7 @@ export default function NewSessionModal({
         return
       }
 
-      if (e.key === 'Enter' && document.activeElement?.tagName !== 'INPUT') {
+      if (e.key === 'Enter' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'SELECT') {
         e.preventDefault()
         if (typeof e.stopPropagation === 'function') e.stopPropagation()
         formRef.current?.requestSubmit()

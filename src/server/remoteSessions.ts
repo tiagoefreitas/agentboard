@@ -228,15 +228,16 @@ export class RemoteSessionPoller {
  * Build a single shell command that captures pane dimensions + content
  * for all sessions, separated by a known marker.
  */
-function buildBatchCaptureCommand(sessions: Session[]): string {
+function buildBatchCaptureCommand(sessions: Session[], separator = PANE_SEPARATOR): string {
   if (sessions.length === 0) return ''
+  const quotedSep = shellQuote(separator)
   return sessions
     .map((s) => {
       const target = shellQuote(s.tmuxWindow)
       // Group dims + capture; suppress stderr so failures produce empty segments
       return (
         `{ tmux display-message -t ${target} -p '#{pane_width} #{pane_height}'` +
-        ` && tmux capture-pane -t ${target} -p -J; } 2>/dev/null; echo ${shellQuote(PANE_SEPARATOR)};`
+        ` && tmux capture-pane -t ${target} -p -J; } 2>/dev/null; echo ${quotedSep};`
       )
     })
     .join(' ')
@@ -248,10 +249,11 @@ function buildBatchCaptureCommand(sessions: Session[]): string {
  */
 function parseBatchCaptureOutput(
   output: string,
-  sessions: Session[]
+  sessions: Session[],
+  separator = PANE_SEPARATOR
 ): Map<string, PaneSnapshot> {
   const result = new Map<string, PaneSnapshot>()
-  const segments = output.split(PANE_SEPARATOR)
+  const segments = output.split(separator)
 
   for (let i = 0; i < sessions.length && i < segments.length; i++) {
     const segment = segments[i]!.trim()
@@ -328,7 +330,8 @@ async function captureRemotePaneStatus(
   sshOptions: string[],
   timeoutMs: number
 ): Promise<void> {
-  const cmd = buildBatchCaptureCommand(sessions)
+  const separator = `__AGENTBOARD_SEP_${crypto.randomUUID()}__`
+  const cmd = buildBatchCaptureCommand(sessions, separator)
   if (!cmd) return
 
   const args = ['ssh', ...sshOptions, host, cmd]
@@ -360,7 +363,7 @@ async function captureRemotePaneStatus(
     return
   }
 
-  const captures = parseBatchCaptureOutput(stdout, sessions)
+  const captures = parseBatchCaptureOutput(stdout, sessions, separator)
   enrichSessionsWithStatus(
     sessions,
     captures,

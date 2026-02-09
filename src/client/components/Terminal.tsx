@@ -116,7 +116,7 @@ export default function Terminal({
   const remoteAllowAttach = useSessionStore((s) => s.remoteAllowAttach)
   const remoteAllowControl = useSessionStore((s) => s.remoteAllowControl)
   const isReadOnly = isRemoteSession && !remoteAllowAttach
-  const canControl = !isRemoteSession || remoteAllowControl
+  const canControl = !isRemoteSession || (remoteAllowControl && session?.source === 'managed')
 
   const { containerRef, terminalRef, inTmuxCopyModeRef, setTmuxCopyMode } = useTerminal({
     sessionId: session?.id ?? null,

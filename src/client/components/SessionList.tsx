@@ -530,11 +530,11 @@ export default function SessionList({
                         showHostInfo={showHostInfo}
                         dropIndicator={showDropIndicator}
                         onSelect={() => onSelect(session.id)}
-                        onStartEdit={!isRemote || remoteAllowControl ? () => setEditingSessionId(session.id) : undefined}
+                        onStartEdit={!isRemote || (remoteAllowControl && session.source === 'managed') ? () => setEditingSessionId(session.id) : undefined}
                         onCancelEdit={() => setEditingSessionId(null)}
                         onRename={(newName) => handleRename(session.id, newName)}
-                        onKill={onKill && (!isRemote || remoteAllowControl) ? () => onKill(session.id) : undefined}
-                        onDuplicate={onDuplicate && (!isRemote || remoteAllowControl) ? () => onDuplicate(session.id) : undefined}
+                        onKill={onKill && (!isRemote || (remoteAllowControl && session.source === 'managed')) ? () => onKill(session.id) : undefined}
+                        onDuplicate={onDuplicate && (!isRemote || (remoteAllowControl && session.source === 'managed')) ? () => onDuplicate(session.id) : undefined}
                         onSetPinned={onSetPinned && session.agentSessionId ? (isPinned) => onSetPinned(session.agentSessionId!.trim(), isPinned) : undefined}
                       />
                     )
