@@ -959,23 +959,29 @@ logger.info('server_started', {
 })
 
 // Cleanup all terminals on server shutdown
-function cleanupAllTerminals() {
+async function cleanupAllTerminals() {
+  const disposePromises: Promise<void>[] = []
   for (const ws of sockets) {
-    cleanupTerminals(ws)
+    if (ws.data.terminal) {
+      disposePromises.push(ws.data.terminal.dispose())
+      ws.data.terminal = null
+    }
+    ws.data.currentSessionId = null
+    ws.data.currentTmuxTarget = null
+    ws.data.terminalHost = null
   }
+  await Promise.allSettled(disposePromises)
   logPoller.stop()
   remotePoller?.stop()
   db.close()
 }
 
 process.on('SIGINT', () => {
-  cleanupAllTerminals()
-  process.exit(0)
+  void cleanupAllTerminals().finally(() => process.exit(0))
 })
 
 process.on('SIGTERM', () => {
-  cleanupAllTerminals()
-  process.exit(0)
+  void cleanupAllTerminals().finally(() => process.exit(0))
 })
 
 function cleanupTerminals(ws: ServerWebSocket<WSData>) {
@@ -1120,9 +1126,10 @@ function handleRemoteCreate(
     send(ws, { type: 'error', message: 'Project path is required' })
     return
   }
-  // Path must be absolute and not contain control characters
-  if (!trimmedPath.startsWith('/') && !trimmedPath.startsWith('~')) {
-    send(ws, { type: 'error', message: 'Project path must be absolute' })
+  // Path must be absolute — tilde is not supported for remote paths because
+  // shellQuote prevents shell expansion on the remote host.
+  if (!trimmedPath.startsWith('/')) {
+    send(ws, { type: 'error', message: 'Remote project path must be an absolute path (~ is not supported)' })
     return
   }
   if (trimmedPath.includes('\n') || trimmedPath.includes('\r') || trimmedPath.includes('\0')) {
@@ -1139,11 +1146,7 @@ function handleRemoteCreate(
 
   try {
     // Validate path exists on remote host
-    const opts = sshOptionsForHost()
-    const testResult = Bun.spawnSync(
-      ['ssh', ...opts, host, `test -d ${shellQuote(trimmedPath)}`],
-      { stdout: 'pipe', stderr: 'pipe' }
-    )
+    const testResult = runRemoteSsh(host, `test -d ${shellQuote(trimmedPath)}`)
     if (testResult.exitCode !== 0) {
       send(ws, { type: 'error', message: `Directory does not exist on ${host}: ${trimmedPath}` })
       return
@@ -1158,10 +1161,7 @@ function handleRemoteCreate(
     // Wrap in interactive login shell so .bashrc PATH is available
     // (non-interactive shells skip .bashrc due to [ -z "$PS1" ] && return guard).
     // Fall back to raw command on systems without bash (e.g. Alpine).
-    const bashCheck = Bun.spawnSync(
-      ['ssh', ...opts, host, 'command -v bash'],
-      { stdout: 'pipe', stderr: 'pipe', timeout: 10_000 }
-    )
+    const bashCheck = runRemoteSsh(host, 'command -v bash')
     const wrappedCommand = bashCheck.exitCode === 0
       ? `bash -lic ${shellQuote(windowCommand)}`
       : windowCommand
@@ -1885,14 +1885,18 @@ function sshOptionsForHost(): string[] {
   ]
 }
 
-function runRemoteTmux(host: string, args: string[]): ReturnType<typeof Bun.spawnSync> {
-  const remoteCmd = `tmux ${args.map(a => shellQuote(a)).join(' ')}`
+function runRemoteSsh(host: string, remoteCmd: string): ReturnType<typeof Bun.spawnSync> {
   const opts = sshOptionsForHost()
   return Bun.spawnSync(['ssh', ...opts, host, remoteCmd], {
     stdout: 'pipe',
     stderr: 'pipe',
     timeout: 10_000,
   })
+}
+
+function runRemoteTmux(host: string, args: string[]): ReturnType<typeof Bun.spawnSync> {
+  const remoteCmd = `tmux ${args.map(a => shellQuote(a)).join(' ')}`
+  return runRemoteSsh(host, remoteCmd)
 }
 
 function captureTmuxHistoryRemote(target: string, host: string): string | null {

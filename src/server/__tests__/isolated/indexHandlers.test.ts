@@ -1068,7 +1068,7 @@ describe('server message handlers', () => {
 
     expect(sent[sent.length - 1]).toEqual({
       type: 'error',
-      message: 'Project path must be absolute',
+      message: 'Remote project path must be an absolute path (~ is not supported)',
     })
   })
 
@@ -1857,6 +1857,9 @@ describe('server signal handlers', () => {
 
     handlers.get('SIGINT')?.()
     handlers.get('SIGTERM')?.()
+
+    // Cleanup is async — wait for disposals and process.exit calls to settle
+    await new Promise((resolve) => setTimeout(resolve, 50))
 
     expect(attached?.disposed).toBe(true)
     expect(exitCodes).toEqual([0, 0])
