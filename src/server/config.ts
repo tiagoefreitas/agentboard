@@ -110,7 +110,7 @@ const remoteHosts = (process.env.AGENTBOARD_REMOTE_HOSTS || '')
   })
 
 const remotePollMsRaw = Number(process.env.AGENTBOARD_REMOTE_POLL_MS)
-const remotePollMs = Number.isFinite(remotePollMsRaw) ? remotePollMsRaw : 15000
+const remotePollMs = Number.isFinite(remotePollMsRaw) ? remotePollMsRaw : 2000
 
 const remoteTimeoutMsRaw = Number(process.env.AGENTBOARD_REMOTE_TIMEOUT_MS)
 const remoteTimeoutMs = Number.isFinite(remoteTimeoutMsRaw) ? remoteTimeoutMsRaw : 4000
