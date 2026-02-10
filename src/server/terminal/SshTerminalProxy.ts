@@ -54,6 +54,9 @@ class SshTerminalProxy extends TerminalProxyBase {
   }
 
   async dispose(): Promise<void> {
+    // Invalidate any in-flight start attempt so doStartCore bails out before
+    // mutating state after we've disposed.
+    this.startAttemptId += 1
     this.state = TerminalState.DEAD
     this.outputSuppressed = false
 
@@ -190,12 +193,21 @@ class SshTerminalProxy extends TerminalProxyBase {
     })
 
     try {
-      await this.runTmuxAsync([
-        'new-session',
-        '-d',
-        '-s',
-        this.options.sessionName,
-      ])
+      try {
+        await this.runTmuxAsync([
+          'new-session',
+          '-d',
+          '-s',
+          this.options.sessionName,
+        ])
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        // Session name is per-WS-connection; if a previous proxy didn't clean up,
+        // treat duplicate sessions as recoverable and try to proceed.
+        if (!message.includes('duplicate session')) {
+          throw error
+        }
+      }
       if (!this.isStartAttemptCurrent(attemptId)) {
         await this.dispose()
         return
@@ -221,7 +233,7 @@ class SshTerminalProxy extends TerminalProxyBase {
     }
 
     // Pass the remote tmux attach command as a single string to SSH
-    const attachCmd = `tmux attach -t ${shellQuote(this.options.sessionName)}`
+    const attachCmd = `tmux new-session -A -s ${shellQuote(this.options.sessionName)}`
     const spawnArgs = [
       'ssh',
       '-tt',
@@ -295,6 +307,7 @@ class SshTerminalProxy extends TerminalProxyBase {
     this.process = proc
 
     proc.exited.then((exitCode) => {
+      if (this.process !== proc) return
       this.process = null
       this.state = TerminalState.DEAD
       logger.warn('ssh_proxy_exited', {

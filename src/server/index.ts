@@ -210,6 +210,7 @@ interface WSData {
   currentTmuxTarget: string | null
   connectionId: string
   terminalHost: string | null
+  terminalAttachSeq: number
 }
 
 const sockets = new Set<ServerWebSocket<WSData>>()
@@ -1004,6 +1005,7 @@ Bun.serve<WSData>({
             currentTmuxTarget: null,
             connectionId: createConnectionId(),
             terminalHost: null,
+            terminalAttachSeq: 0,
           },
         })
       ) {
@@ -1160,12 +1162,13 @@ function handleMessage(
     case 'session-rename':
       fireAndForget(handleRename(message.sessionId, message.newName, ws), 'handleRename')
       return
-    case 'terminal-attach':
-      fireAndForget(attachTerminalPersistent(ws, message), 'attachTerminalPersistent')
-      return
-    case 'terminal-detach':
-      detachTerminalPersistent(ws, message.sessionId)
-      return
+	    case 'terminal-attach':
+	      ws.data.terminalAttachSeq += 1
+	      fireAndForget(attachTerminalPersistent(ws, message, ws.data.terminalAttachSeq), 'attachTerminalPersistent')
+	      return
+	    case 'terminal-detach':
+	      detachTerminalPersistent(ws, message.sessionId)
+	      return
     case 'terminal-input':
       handleTerminalInputPersistent(ws, message.sessionId, message.data)
       return
@@ -1788,6 +1791,8 @@ function createPersistentTerminal(ws: ServerWebSocket<WSData>) {
     baseSession: config.tmuxSession,
     monitorTargets: config.terminalMonitorTargets,
     onData: (data) => {
+      // Guard: ignore output from proxies that have been replaced.
+      if (ws.data.terminal !== terminal) return
       const sessionId = ws.data.currentSessionId
       if (!sessionId) {
         return
@@ -1817,44 +1822,74 @@ function createPersistentTerminal(ws: ServerWebSocket<WSData>) {
   return terminal
 }
 
+function isTerminalAttachCurrent(ws: ServerWebSocket<WSData>, attachSeq: number): boolean {
+  return ws.data.terminalAttachSeq === attachSeq
+}
+
 async function ensurePersistentTerminal(
-  ws: ServerWebSocket<WSData>
+  ws: ServerWebSocket<WSData>,
+  attachSeq: number
 ): Promise<ITerminalProxy | null> {
-  if (!ws.data.terminal) {
-    ws.data.terminal = createPersistentTerminal(ws)
+  if (!isTerminalAttachCurrent(ws, attachSeq)) {
+    return null
   }
 
+  if (!ws.data.terminal) {
+    const created = createPersistentTerminal(ws)
+    // If a newer attach/detach arrived while creating the proxy, dispose it.
+    if (!isTerminalAttachCurrent(ws, attachSeq)) {
+      await created.dispose()
+      return null
+    }
+    ws.data.terminal = created
+  }
+
+  const terminal = ws.data.terminal
   try {
-    await ws.data.terminal.start()
-    return ws.data.terminal
+    await terminal.start()
+    if (!isTerminalAttachCurrent(ws, attachSeq)) {
+      return null
+    }
+    return terminal
   } catch (error) {
-    handleTerminalError(ws, ws.data.currentSessionId, error, 'ERR_TMUX_ATTACH_FAILED')
-    ws.data.terminal = null
-    return null
+    if (ws.data.terminal === terminal) {
+      ws.data.terminal = null
+    }
+    throw error
   }
 }
 
 async function ensureCorrectProxyType(
   ws: ServerWebSocket<WSData>,
-  session: Session
+  session: Session,
+  attachSeq: number
 ): Promise<ITerminalProxy | null> {
+  if (!isTerminalAttachCurrent(ws, attachSeq)) {
+    return null
+  }
+
   const needsSsh = session.remote === true && !!session.host
   const currentHost = ws.data.terminalHost
 
   // Same type — reuse existing proxy
   if (!needsSsh && !currentHost) {
-    return ensurePersistentTerminal(ws)
+    return ensurePersistentTerminal(ws, attachSeq)
   }
   if (needsSsh && currentHost === session.host) {
     if (ws.data.terminal) {
+      const terminal = ws.data.terminal
       try {
-        await ws.data.terminal.start()
-        return ws.data.terminal
+        await terminal.start()
+        if (!isTerminalAttachCurrent(ws, attachSeq)) {
+          return null
+        }
+        return terminal
       } catch (error) {
-        handleTerminalError(ws, ws.data.currentSessionId, error, 'ERR_TMUX_ATTACH_FAILED')
-        ws.data.terminal = null
-        ws.data.terminalHost = null
-        return null
+        if (ws.data.terminal === terminal) {
+          ws.data.terminal = null
+          ws.data.terminalHost = null
+        }
+        throw error
       }
     }
   }
@@ -1864,23 +1899,30 @@ async function ensureCorrectProxyType(
     const oldTerminal = ws.data.terminal
     // Clear references BEFORE dispose so the onExit guard sees the proxy was replaced
     // (dispose triggers process exit → onExit callback, which checks ws.data.terminal !== terminal)
-    ws.data.terminal = null
-    ws.data.terminalHost = null
-    ws.data.currentSessionId = null
-    ws.data.currentTmuxTarget = null
+    if (isTerminalAttachCurrent(ws, attachSeq) && ws.data.terminal === oldTerminal) {
+      ws.data.terminal = null
+      ws.data.terminalHost = null
+      ws.data.currentSessionId = null
+      ws.data.currentTmuxTarget = null
+    }
     await oldTerminal.dispose()
   }
 
+  if (!isTerminalAttachCurrent(ws, attachSeq)) {
+    return null
+  }
+
   if (needsSsh) {
-    return createAndStartSshProxy(ws, session.host!)
+    return createAndStartSshProxy(ws, session.host!, attachSeq)
   } else {
-    return ensurePersistentTerminal(ws)
+    return ensurePersistentTerminal(ws, attachSeq)
   }
 }
 
-function createAndStartSshProxy(
+async function createAndStartSshProxy(
   ws: ServerWebSocket<WSData>,
-  host: string
+  host: string,
+  attachSeq: number
 ): Promise<ITerminalProxy | null> {
   const sshOptions = sshOptionsForHost()
   const sessionName = `${config.tmuxSession}-ws-${ws.data.connectionId}`
@@ -1893,6 +1935,8 @@ function createAndStartSshProxy(
     sshOptions,
     commandTimeoutMs: config.remoteTimeoutMs,
     onData: (data) => {
+      // Guard: ignore output from proxies that have been replaced.
+      if (ws.data.terminal !== terminal) return
       const sessionId = ws.data.currentSessionId
       if (!sessionId) return
       send(ws, { type: 'terminal-output', sessionId, data })
@@ -1918,47 +1962,88 @@ function createAndStartSshProxy(
     },
   })
 
+  if (!isTerminalAttachCurrent(ws, attachSeq)) {
+    await terminal.dispose()
+    return null
+  }
+
   ws.data.terminal = terminal
   ws.data.terminalHost = host
 
-  return terminal.start().then(() => terminal).catch((error) => {
-    handleTerminalError(ws, ws.data.currentSessionId, error, 'ERR_TMUX_ATTACH_FAILED')
-    ws.data.terminal = null
-    ws.data.terminalHost = null
-    return null
-  })
+  try {
+    await terminal.start()
+    if (!isTerminalAttachCurrent(ws, attachSeq)) {
+      await terminal.dispose()
+      return null
+    }
+    if (ws.data.terminal !== terminal) {
+      // Another attach request replaced this proxy while it was starting.
+      await terminal.dispose()
+      return null
+    }
+    return terminal
+  } catch (error) {
+    if (ws.data.terminal === terminal) {
+      ws.data.terminal = null
+      ws.data.terminalHost = null
+    }
+    throw error
+  }
 }
 
 async function attachTerminalPersistent(
   ws: ServerWebSocket<WSData>,
-  message: Extract<ClientMessage, { type: 'terminal-attach' }>
+  message: Extract<ClientMessage, { type: 'terminal-attach' }>,
+  attachSeq: number
 ) {
   const { sessionId, tmuxTarget, cols, rows } = message
 
+  if (!isTerminalAttachCurrent(ws, attachSeq)) {
+    return
+  }
+
   if (!isValidSessionId(sessionId)) {
-    sendTerminalError(ws, sessionId, 'ERR_INVALID_WINDOW', 'Invalid session id', false)
+    if (isTerminalAttachCurrent(ws, attachSeq)) {
+      sendTerminalError(ws, sessionId, 'ERR_INVALID_WINDOW', 'Invalid session id', false)
+    }
     return
   }
 
   const session = registry.get(sessionId)
   if (!session) {
-    sendTerminalError(ws, sessionId, 'ERR_INVALID_WINDOW', 'Session not found', false)
+    if (isTerminalAttachCurrent(ws, attachSeq)) {
+      sendTerminalError(ws, sessionId, 'ERR_INVALID_WINDOW', 'Session not found', false)
+    }
     return
   }
   if (session.remote && !config.remoteAllowAttach) {
     const host = session.host ? ` on ${session.host}` : ''
-    sendTerminalError(ws, sessionId, 'ERR_INVALID_WINDOW', `Remote session${host} is read-only`, false)
+    if (isTerminalAttachCurrent(ws, attachSeq)) {
+      sendTerminalError(ws, sessionId, 'ERR_INVALID_WINDOW', `Remote session${host} is read-only`, false)
+    }
     return
   }
 
   const target = tmuxTarget ?? session.tmuxWindow
   if (!isValidTmuxTarget(target)) {
-    sendTerminalError(ws, sessionId, 'ERR_INVALID_WINDOW', 'Invalid tmux target', false)
+    if (isTerminalAttachCurrent(ws, attachSeq)) {
+      sendTerminalError(ws, sessionId, 'ERR_INVALID_WINDOW', 'Invalid tmux target', false)
+    }
     return
   }
 
-  const terminal = await ensureCorrectProxyType(ws, session)
-  if (!terminal) {
+  let terminal: ITerminalProxy | null = null
+  try {
+    terminal = await ensureCorrectProxyType(ws, session, attachSeq)
+    if (!terminal) return
+  } catch (error) {
+    if (sockets.has(ws) && isTerminalAttachCurrent(ws, attachSeq)) {
+      handleTerminalError(ws, sessionId, error, 'ERR_TMUX_ATTACH_FAILED')
+    }
+    return
+  }
+
+  if (!isTerminalAttachCurrent(ws, attachSeq)) {
     return
   }
 
@@ -1971,8 +2056,13 @@ async function attachTerminalPersistent(
     ? await captureTmuxHistoryRemote(target, session.host)
     : captureTmuxHistory(target)
 
+  if (!isTerminalAttachCurrent(ws, attachSeq)) {
+    return
+  }
+
   try {
     await terminal.switchTo(target, () => {
+      if (!isTerminalAttachCurrent(ws, attachSeq)) return
       ws.data.currentSessionId = sessionId
       ws.data.currentTmuxTarget = target
       // Send history in onReady callback, before output suppression is lifted
@@ -1980,18 +2070,26 @@ async function attachTerminalPersistent(
         send(ws, { type: 'terminal-output', sessionId, data: history })
       }
     })
+    if (!isTerminalAttachCurrent(ws, attachSeq)) {
+      return
+    }
     ws.data.currentSessionId = sessionId
     ws.data.currentTmuxTarget = target
     logger.info('terminal_ready_sent', { sessionId, target, connectionId: ws.data.connectionId })
     send(ws, { type: 'terminal-ready', sessionId })
   } catch (error) {
+    if (!isTerminalAttachCurrent(ws, attachSeq)) {
+      return
+    }
     logger.warn('terminal_switch_failed', {
       sessionId,
       target,
       error: error instanceof Error ? error.message : String(error),
       connectionId: ws.data.connectionId,
     })
-    handleTerminalError(ws, sessionId, error, 'ERR_TMUX_SWITCH_FAILED')
+    if (sockets.has(ws) && isTerminalAttachCurrent(ws, attachSeq)) {
+      handleTerminalError(ws, sessionId, error, 'ERR_TMUX_SWITCH_FAILED')
+    }
   }
 }
 
@@ -2076,6 +2174,9 @@ async function captureTmuxHistoryRemote(target: string, host: string): Promise<s
 }
 
 function detachTerminalPersistent(ws: ServerWebSocket<WSData>, sessionId: string) {
+  // Cancel any in-flight attach/switch operations so stale completions don't
+  // clobber the newly-selected session.
+  ws.data.terminalAttachSeq += 1
   if (ws.data.currentSessionId === sessionId) {
     ws.data.currentSessionId = null
     ws.data.currentTmuxTarget = null

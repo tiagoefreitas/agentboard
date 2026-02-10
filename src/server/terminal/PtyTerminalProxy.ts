@@ -7,6 +7,7 @@ class PtyTerminalProxy extends TerminalProxyBase {
   private cols = 80
   private rows = 24
   private clientTty: string | null = null
+  private startAttemptId = 0
 
   getMode(): 'pty' {
     return 'pty'
@@ -32,6 +33,9 @@ class PtyTerminalProxy extends TerminalProxyBase {
   }
 
   async dispose(): Promise<void> {
+    // Invalidate any in-flight start attempt so doStart bails out before
+    // mutating state after we've disposed.
+    this.startAttemptId += 1
     this.state = TerminalState.DEAD
     this.outputSuppressed = false
 
@@ -65,6 +69,7 @@ class PtyTerminalProxy extends TerminalProxyBase {
       return
     }
 
+    const attemptId = ++this.startAttemptId
     const startedAt = this.now()
     this.state = TerminalState.ATTACHING
 
@@ -92,6 +97,11 @@ class PtyTerminalProxy extends TerminalProxyBase {
           : 'Failed to create grouped session',
         true
       )
+    }
+
+    if (attemptId !== this.startAttemptId) {
+      await this.dispose()
+      return
     }
 
     let proc: ReturnType<typeof Bun.spawn>
@@ -129,9 +139,21 @@ class PtyTerminalProxy extends TerminalProxyBase {
       )
     }
 
+    if (attemptId !== this.startAttemptId) {
+      try {
+        proc.kill()
+        proc.terminal?.close()
+      } catch {
+        // Ignore if already exited
+      }
+      await this.dispose()
+      return
+    }
+
     this.process = proc
 
     proc.exited.then(() => {
+      if (this.process !== proc) return
       this.process = null
       this.state = TerminalState.DEAD
       this.logEvent('terminal_proxy_dead', {
@@ -143,6 +165,10 @@ class PtyTerminalProxy extends TerminalProxyBase {
 
     try {
       const tty = await this.discoverClientTty(proc.pid)
+      if (attemptId !== this.startAttemptId) {
+        await this.dispose()
+        return
+      }
       this.clientTty = tty
       this.readyAt = this.now()
       this.state = TerminalState.READY
