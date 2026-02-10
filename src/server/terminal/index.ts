@@ -1,6 +1,7 @@
 export { TerminalProxyBase } from './TerminalProxyBase'
 export { PtyTerminalProxy } from './PtyTerminalProxy'
 export { PipePaneTerminalProxy } from './PipePaneTerminalProxy'
-export { createTerminalProxy, resolveTerminalMode } from './TerminalProxyFactory'
+export { SshTerminalProxy } from './SshTerminalProxy'
+export { createTerminalProxy, createSshTerminalProxy, resolveTerminalMode } from './TerminalProxyFactory'
 export { TerminalProxyError, TerminalState } from './types'
 export type { ITerminalProxy, TerminalMode, TerminalProxyOptions } from './types'

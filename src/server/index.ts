@@ -3,7 +3,7 @@ import path from 'node:path'
 import fs from 'node:fs/promises'
 import { Hono } from 'hono'
 import { serveStatic } from 'hono/bun'
-import { config } from './config'
+import { config, isValidHostname } from './config'
 import { ensureTmux } from './prerequisites'
 import { SessionManager } from './SessionManager'
 import { SessionRegistry } from './SessionRegistry'
@@ -43,7 +43,11 @@ import {
   isValidSessionId,
   isValidTmuxTarget,
 } from './validators'
-import { RemoteSessionPoller } from './remoteSessions'
+import { RemoteSessionPoller, splitSshOptions, buildRemoteSessionId } from './remoteSessions'
+import { normalizePaneStartCommand } from './agentDetection'
+import { generateSessionName } from './nameGenerator'
+import { shellQuote } from './shellQuote'
+import { SshTerminalProxy } from './terminal/SshTerminalProxy'
 
 function checkPortAvailable(port: number): void {
   let result: ReturnType<typeof Bun.spawnSync>
@@ -205,6 +209,7 @@ interface WSData {
   currentSessionId: string | null
   currentTmuxTarget: string | null
   connectionId: string
+  terminalHost: string | null
 }
 
 const sockets = new Set<ServerWebSocket<WSData>>()
@@ -222,9 +227,97 @@ function stampLocalSessions(sessions: Session[]): Session[] {
   return sessions.map(stampLocalSession)
 }
 
+// Remote session create is optimistic (we broadcast `session-created` immediately),
+// but the remote poller snapshot can lag behind. Protect newly-created remote ids
+// so refresh cycles don't drop them until the poller catches up.
+const PROTECTED_REMOTE_SESSION_TTL_MS = 30_000
+const protectedRemoteSessionIds = new Map<string, number>()
+
+// Remote control operations (kill/rename) are also optimistic, but refresh cycles rebuild
+// remote sessions from the poller snapshot. Track short-lived overrides so stale snapshots
+// don't resurrect killed sessions or revert renames.
+const REMOTE_SESSION_MUTATION_TTL_MS = 30_000
+const remoteSessionTombstones = new Map<string, number>()
+const remoteSessionNameOverrides = new Map<string, { name: string; setAt: number }>()
+
 function mergeRemoteSessions(sessions: Session[]): Session[] {
   const remoteSessions = remotePoller?.getSessions() ?? []
-  return [...stampLocalSessions(sessions), ...remoteSessions]
+  const needsMerge =
+    protectedRemoteSessionIds.size > 0 ||
+    remoteSessionTombstones.size > 0 ||
+    remoteSessionNameOverrides.size > 0
+  if (!needsMerge) {
+    return [...stampLocalSessions(sessions), ...remoteSessions]
+  }
+
+  const now = Date.now()
+  const remoteIds = new Set(remoteSessions.map((session) => session.id))
+  const remoteById = new Map(remoteSessions.map((session) => [session.id, session]))
+  const byId = new Map(registry.getAll().map((session) => [session.id, session]))
+  const protectedSessions: Session[] = []
+
+  for (const [id, killedAt] of remoteSessionTombstones) {
+    if (now - killedAt > REMOTE_SESSION_MUTATION_TTL_MS) {
+      remoteSessionTombstones.delete(id)
+      continue
+    }
+    if (!remoteIds.has(id)) {
+      // Poller has confirmed it's gone; no longer needs a tombstone.
+      remoteSessionTombstones.delete(id)
+    }
+  }
+
+  for (const [id, override] of remoteSessionNameOverrides) {
+    if (now - override.setAt > REMOTE_SESSION_MUTATION_TTL_MS) {
+      remoteSessionNameOverrides.delete(id)
+      continue
+    }
+    const polled = remoteById.get(id)
+    if (!polled) {
+      // Session disappeared (killed/host stale); stop overriding.
+      remoteSessionNameOverrides.delete(id)
+      continue
+    }
+    if (polled.name === override.name) {
+      // Poller has picked up the rename.
+      remoteSessionNameOverrides.delete(id)
+    }
+  }
+
+  for (const [id, addedAt] of protectedRemoteSessionIds) {
+    if (now - addedAt > PROTECTED_REMOTE_SESSION_TTL_MS) {
+      protectedRemoteSessionIds.delete(id)
+      continue
+    }
+    if (remoteIds.has(id)) {
+      // Poller has discovered it; no longer needs protection.
+      protectedRemoteSessionIds.delete(id)
+      continue
+    }
+    const existing = byId.get(id)
+    if (existing?.remote) {
+      protectedSessions.push(existing)
+    } else {
+      // Session disappeared from registry (killed/failed); stop protecting it.
+      protectedRemoteSessionIds.delete(id)
+    }
+  }
+
+  const mergedRemote: Session[] = []
+  for (const session of remoteSessions) {
+    const killedAt = remoteSessionTombstones.get(session.id)
+    if (killedAt && now - killedAt <= REMOTE_SESSION_MUTATION_TTL_MS) {
+      continue
+    }
+    const override = remoteSessionNameOverrides.get(session.id)
+    if (override && now - override.setAt <= REMOTE_SESSION_MUTATION_TTL_MS) {
+      mergedRemote.push({ ...session, name: override.name })
+    } else {
+      mergedRemote.push(session)
+    }
+  }
+
+  return [...stampLocalSessions(sessions), ...protectedSessions, ...mergedRemote]
 }
 
 let hostStatuses: HostStatus[] = []
@@ -253,6 +346,8 @@ const remotePoller = (config.remoteHosts?.length ?? 0) > 0
       timeoutMs: config.remoteTimeoutMs,
       staleAfterMs: config.remoteStaleMs,
       sshOptions: config.remoteSshOpts,
+      tmuxSessionPrefix: config.tmuxSession,
+      discoverPrefixes: config.discoverPrefixes,
       onUpdate: (statuses) => updateHostStatuses(statuses),
     })
   : null
@@ -908,6 +1003,7 @@ Bun.serve<WSData>({
             currentSessionId: null,
             currentTmuxTarget: null,
             connectionId: createConnectionId(),
+            terminalHost: null,
           },
         })
       ) {
@@ -923,6 +1019,12 @@ Bun.serve<WSData>({
       sockets.add(ws)
       send(ws, { type: 'sessions', sessions: registry.getAll() })
       send(ws, { type: 'host-status', hosts: hostStatuses })
+      send(ws, {
+        type: 'server-config',
+        remoteAllowControl: config.remoteAllowControl,
+        remoteAllowAttach: config.remoteAllowAttach,
+        hostLabel: config.hostLabel,
+      })
       const agentSessions = registry.getAgentSessions()
       send(ws, {
         type: 'agent-sessions',
@@ -952,23 +1054,29 @@ logger.info('server_started', {
 })
 
 // Cleanup all terminals on server shutdown
-function cleanupAllTerminals() {
+async function cleanupAllTerminals() {
+  const disposePromises: Promise<void>[] = []
   for (const ws of sockets) {
-    cleanupTerminals(ws)
+    if (ws.data.terminal) {
+      disposePromises.push(ws.data.terminal.dispose())
+      ws.data.terminal = null
+    }
+    ws.data.currentSessionId = null
+    ws.data.currentTmuxTarget = null
+    ws.data.terminalHost = null
   }
+  await Promise.allSettled(disposePromises)
   logPoller.stop()
   remotePoller?.stop()
   db.close()
 }
 
 process.on('SIGINT', () => {
-  cleanupAllTerminals()
-  process.exit(0)
+  void cleanupAllTerminals().finally(() => process.exit(0))
 })
 
 process.on('SIGTERM', () => {
-  cleanupAllTerminals()
-  process.exit(0)
+  void cleanupAllTerminals().finally(() => process.exit(0))
 })
 
 function cleanupTerminals(ws: ServerWebSocket<WSData>) {
@@ -978,6 +1086,7 @@ function cleanupTerminals(ws: ServerWebSocket<WSData>) {
   }
   ws.data.currentSessionId = null
   ws.data.currentTmuxTarget = null
+  ws.data.terminalHost = null
 }
 
 function broadcast(message: ServerMessage) {
@@ -989,6 +1098,15 @@ function broadcast(message: ServerMessage) {
 
 function send(ws: ServerWebSocket<WSData>, message: ServerMessage) {
   ws.send(JSON.stringify(message))
+}
+
+function fireAndForget(promise: Promise<unknown>, context: string): void {
+  promise.catch((err) => {
+    logger.error('unhandled_async_error', {
+      context,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  })
 }
 
 function handleMessage(
@@ -1013,33 +1131,37 @@ function handleMessage(
       refreshSessions()
       return
     case 'session-create':
-      try {
-        const created = stampLocalSession(sessionManager.createWindow(
-          message.projectPath,
-          message.name,
-          message.command
-        ))
-        // Add session to registry immediately so terminal can attach
-        const currentSessions = registry.getAll()
-        registry.replaceSessions([created, ...currentSessions])
-        refreshSessions()
-        send(ws, { type: 'session-created', session: created })
-      } catch (error) {
-        send(ws, {
-          type: 'error',
-          message:
-            error instanceof Error ? error.message : 'Unable to create session',
-        })
+      if (message.host) {
+        fireAndForget(handleRemoteCreate(message.host, message.projectPath, message.name, message.command, ws), 'handleRemoteCreate')
+      } else {
+        try {
+          const created = stampLocalSession(sessionManager.createWindow(
+            message.projectPath,
+            message.name,
+            message.command
+          ))
+          // Add session to registry immediately so terminal can attach
+          const currentSessions = registry.getAll()
+          registry.replaceSessions([created, ...currentSessions])
+          refreshSessions()
+          send(ws, { type: 'session-created', session: created })
+        } catch (error) {
+          send(ws, {
+            type: 'error',
+            message:
+              error instanceof Error ? error.message : 'Unable to create session',
+          })
+        }
       }
       return
     case 'session-kill':
-      handleKill(message.sessionId, ws)
+      fireAndForget(handleKill(message.sessionId, ws), 'handleKill')
       return
     case 'session-rename':
-      handleRename(message.sessionId, message.newName, ws)
+      fireAndForget(handleRename(message.sessionId, message.newName, ws), 'handleRename')
       return
     case 'terminal-attach':
-      void attachTerminalPersistent(ws, message)
+      fireAndForget(attachTerminalPersistent(ws, message), 'attachTerminalPersistent')
       return
     case 'terminal-detach':
       detachTerminalPersistent(ws, message.sessionId)
@@ -1057,10 +1179,10 @@ function handleMessage(
       return
     case 'tmux-cancel-copy-mode':
       // Exit tmux copy-mode when user starts typing after scrolling
-      handleCancelCopyMode(message.sessionId, ws)
+      fireAndForget(handleCancelCopyMode(message.sessionId, ws), 'handleCancelCopyMode')
       return
     case 'tmux-check-copy-mode':
-      handleCheckCopyMode(message.sessionId, ws)
+      fireAndForget(handleCheckCopyMode(message.sessionId, ws), 'handleCheckCopyMode')
       return
     case 'session-resume':
       handleSessionResume(message, ws)
@@ -1084,36 +1206,196 @@ function resolveCopyModeTarget(
   return session.tmuxWindow
 }
 
-function handleCancelCopyMode(sessionId: string, ws: ServerWebSocket<WSData>) {
+async function handleRemoteCreate(
+  host: string,
+  projectPath: string,
+  name: string | undefined,
+  command: string | undefined,
+  ws: ServerWebSocket<WSData>
+) {
+  if (!config.remoteAllowControl) {
+    send(ws, { type: 'error', message: 'Remote session creation is disabled' })
+    return
+  }
+  if (!isValidHostname(host)) {
+    send(ws, { type: 'error', message: 'Invalid hostname' })
+    return
+  }
+  if (!config.remoteHosts.includes(host)) {
+    send(ws, { type: 'error', message: 'Host is not in the configured remote hosts list' })
+    return
+  }
+  const trimmedPath = projectPath.trim()
+  if (!trimmedPath) {
+    send(ws, { type: 'error', message: 'Project path is required' })
+    return
+  }
+  // Path must be absolute and not contain control characters
+  if (!trimmedPath.startsWith('/')) {
+    send(ws, { type: 'error', message: 'Project path must be an absolute path (starting with /)' })
+    return
+  }
+  if (trimmedPath.includes('\n') || trimmedPath.includes('\r') || trimmedPath.includes('\0')) {
+    send(ws, { type: 'error', message: 'Project path contains invalid characters' })
+    return
+  }
+
+  // Validate name format if provided (same rules as rename)
+  const windowName = name?.trim() || generateSessionName()
+  if (name?.trim() && !/^[\w-]+$/.test(windowName)) {
+    send(ws, { type: 'error', message: 'Name can only contain letters, numbers, hyphens, and underscores' })
+    return
+  }
+
+  try {
+    // Validate path exists on remote host
+    const testResult = await runRemoteSsh(host, `test -d ${shellQuote(trimmedPath)}`)
+    if (testResult.exitCode !== 0) {
+      send(ws, { type: 'error', message: `Directory does not exist on ${host}: ${trimmedPath}` })
+      return
+    }
+
+    // Check if tmux session already exists on remote
+    const tmuxSession = config.tmuxSession
+    const hasSessionResult = await runRemoteTmux(host, ['has-session', '-t', tmuxSession])
+    const sessionExists = hasSessionResult.exitCode === 0
+
+    const windowCommand = normalizePaneStartCommand(command?.trim() || '') || 'claude'
+    // Wrap in interactive login shell so .bashrc PATH is available
+    // (non-interactive shells skip .bashrc due to [ -z "$PS1" ] && return guard).
+    // Fall back to raw command on systems without bash (e.g. Alpine).
+    const bashCheck = await runRemoteSsh(host, 'command -v bash')
+    const wrappedCommand = bashCheck.exitCode === 0
+      ? `bash -lic ${shellQuote(windowCommand)}`
+      : windowCommand
+    let createResult: { exitCode: number; stdout: string; stderr: string }
+
+    if (sessionExists) {
+      // Session exists — add a new window to it
+      createResult = await runRemoteTmux(host, [
+        'new-window', '-P',
+        '-F', '#{window_index}\t#{window_id}',
+        '-t', tmuxSession, '-n', windowName, '-c', trimmedPath, wrappedCommand,
+      ])
+    } else {
+      // Session doesn't exist — create it with the desired window directly
+      // (avoids an orphan window 0 from a separate new-session call)
+      createResult = await runRemoteTmux(host, [
+        'new-session', '-d', '-P',
+        '-F', '#{window_index}\t#{window_id}',
+        '-s', tmuxSession, '-n', windowName, '-c', trimmedPath, wrappedCommand,
+      ])
+    }
+    if (createResult.exitCode !== 0) {
+      const stderr = createResult.stderr?.trim() ?? 'Unknown error'
+      send(ws, { type: 'error', message: `Failed to create remote window: ${stderr}` })
+      return
+    }
+
+    // Parse window info from -P output (e.g. "3\t@5")
+    const printOutput = createResult.stdout?.trim() ?? ''
+    const parts = printOutput.split('\t')
+    const now = Date.now()
+
+    if (parts.length < 2 || !parts[0]) {
+      send(ws, { type: 'error', message: 'Failed to verify remote session creation' })
+      return
+    }
+
+    const windowIndex = parts[0].trim()
+    const windowId = (parts[1] ?? '').trim()
+    const stableTarget = windowId || windowIndex
+
+    // Verify the window actually persists. When adding a new window to an existing session,
+    // `tmux has-session -t <session>` can still succeed even if the new window exited
+    // immediately (and was cleaned up by tmux).
+    const verifyResult = await runRemoteTmux(host, ['has-session', '-t', `${tmuxSession}:${stableTarget}`])
+    if (verifyResult.exitCode !== 0) {
+      logger.warn('remote_window_exited_immediately', {
+        host,
+        tmuxSession,
+        windowName,
+        windowIndex,
+        windowId: windowId || undefined,
+        stableTarget,
+        command: windowCommand,
+        wrappedCommand,
+      })
+      send(ws, {
+        type: 'error',
+        message: `Remote window exited immediately on ${host} — command "${windowCommand}" may have failed`,
+      })
+      return
+    }
+    const id = buildRemoteSessionId(host, tmuxSession, windowIndex, windowId)
+    const createdSession: Session = {
+      id,
+      name: windowName,
+      tmuxWindow: `${tmuxSession}:${stableTarget}`,
+      projectPath: trimmedPath,
+      status: 'unknown',
+      lastActivity: new Date(now).toISOString(),
+      createdAt: new Date(now).toISOString(),
+      source: 'managed',
+      host,
+      remote: true,
+      command: windowCommand,
+    }
+
+    protectedRemoteSessionIds.set(createdSession.id, now)
+
+    // Add to registry so it appears immediately
+    const currentSessions = registry.getAll()
+    registry.replaceSessions([createdSession, ...currentSessions])
+    send(ws, { type: 'session-created', session: createdSession })
+  } catch (error) {
+    send(ws, {
+      type: 'error',
+      message: error instanceof Error ? error.message : 'Unable to create remote session',
+    })
+  }
+}
+
+async function handleCancelCopyMode(sessionId: string, ws: ServerWebSocket<WSData>) {
   const session = registry.get(sessionId)
   if (!session) return
-  if (session.remote) return
+  if (session.remote && !config.remoteAllowAttach) return
 
   try {
     // Exit tmux copy-mode quietly.
     const target = resolveCopyModeTarget(sessionId, ws, session)
-    Bun.spawnSync(['tmux', 'send-keys', '-X', '-t', target, 'cancel'], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
+    if (session.remote && session.host) {
+      await runRemoteTmux(session.host, ['send-keys', '-X', '-t', target, 'cancel'])
+    } else {
+      Bun.spawnSync(['tmux', 'send-keys', '-X', '-t', target, 'cancel'], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+    }
   } catch {
     // Ignore errors - copy-mode may not be active
   }
 }
 
-function handleCheckCopyMode(sessionId: string, ws: ServerWebSocket<WSData>) {
+async function handleCheckCopyMode(sessionId: string, ws: ServerWebSocket<WSData>) {
   const session = registry.get(sessionId)
   if (!session) return
-  if (session.remote) return
+  if (session.remote && !config.remoteAllowAttach) return
 
   try {
     const target = resolveCopyModeTarget(sessionId, ws, session)
     // Query tmux for pane copy-mode status
-    const result = Bun.spawnSync(
-      ['tmux', 'display-message', '-p', '-t', target, '#{pane_in_mode}'],
-      { stdout: 'pipe', stderr: 'pipe' }
-    )
-    const output = result.stdout.toString().trim()
+    let output: string
+    if (session.remote && session.host) {
+      const result = await runRemoteTmux(session.host, ['display-message', '-p', '-t', target, '#{pane_in_mode}'])
+      output = result.stdout?.trim() ?? ''
+    } else {
+      const result = Bun.spawnSync(
+        ['tmux', 'display-message', '-p', '-t', target, '#{pane_in_mode}'],
+        { stdout: 'pipe', stderr: 'pipe' }
+      )
+      output = result.stdout?.toString().trim() ?? ''
+    }
     const inCopyMode = output === '1'
     send(ws, { type: 'tmux-copy-mode-status', sessionId, inCopyMode })
   } catch {
@@ -1122,14 +1404,39 @@ function handleCheckCopyMode(sessionId: string, ws: ServerWebSocket<WSData>) {
   }
 }
 
-function handleKill(sessionId: string, ws: ServerWebSocket<WSData>) {
+async function handleKill(sessionId: string, ws: ServerWebSocket<WSData>) {
   const session = registry.get(sessionId)
   if (!session) {
     send(ws, { type: 'kill-failed', sessionId, message: 'Session not found' })
     return
   }
-  if (session.remote) {
+  if (session.remote && !config.remoteAllowControl) {
     send(ws, { type: 'kill-failed', sessionId, message: 'Remote sessions are read-only' })
+    return
+  }
+  if (session.remote && config.remoteAllowControl && session.host) {
+    if (session.source !== 'managed') {
+      send(ws, { type: 'kill-failed', sessionId, message: 'Cannot kill external remote sessions' })
+      return
+    }
+    try {
+      const result = await runRemoteTmux(session.host, ['kill-window', '-t', session.tmuxWindow])
+      if (result.exitCode !== 0) {
+        const stderr = result.stderr?.trim() ?? 'Unknown error'
+        send(ws, { type: 'kill-failed', sessionId, message: stderr })
+        return
+      }
+      remoteSessionNameOverrides.delete(sessionId)
+      remoteSessionTombstones.set(sessionId, Date.now())
+      const remaining = registry.getAll().filter((item) => item.id !== sessionId)
+      registry.replaceSessions(remaining)
+    } catch (error) {
+      send(ws, {
+        type: 'kill-failed',
+        sessionId,
+        message: error instanceof Error ? error.message : 'Unable to kill remote session',
+      })
+    }
     return
   }
   if (session.source !== 'managed' && !config.allowKillExternal) {
@@ -1172,7 +1479,7 @@ function handleKill(sessionId: string, ws: ServerWebSocket<WSData>) {
   }
 }
 
-function handleRename(
+async function handleRename(
   sessionId: string,
   newName: string,
   ws: ServerWebSocket<WSData>
@@ -1186,8 +1493,43 @@ function handleRename(
       return
     }
   }
-  if (session.remote) {
+  if (session.remote && !config.remoteAllowControl) {
     send(ws, { type: 'error', message: 'Remote sessions are read-only' })
+    return
+  }
+  if (session.remote && config.remoteAllowControl && session.host) {
+    if (session.source !== 'managed') {
+      send(ws, { type: 'error', message: 'Cannot rename external remote sessions' })
+      return
+    }
+    const trimmed = newName.trim()
+    if (!trimmed) {
+      send(ws, { type: 'error', message: 'Name cannot be empty' })
+      return
+    }
+    if (!/^[\w-]+$/.test(trimmed)) {
+      send(ws, { type: 'error', message: 'Name can only contain letters, numbers, hyphens, and underscores' })
+      return
+    }
+    try {
+      const result = await runRemoteTmux(session.host, ['rename-window', '-t', session.tmuxWindow, trimmed])
+      if (result.exitCode !== 0) {
+        const stderr = result.stderr?.trim() ?? 'Unknown error'
+        send(ws, { type: 'error', message: stderr })
+        return
+      }
+      remoteSessionNameOverrides.set(sessionId, { name: trimmed, setAt: Date.now() })
+      const currentSessions = registry.getAll()
+      const nextSessions = currentSessions.map((item) =>
+        item.id === sessionId ? { ...item, name: trimmed } : item
+      )
+      registry.replaceSessions(nextSessions)
+    } catch (error) {
+      send(ws, {
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Unable to rename remote session',
+      })
+    }
     return
   }
 
@@ -1453,6 +1795,8 @@ function createPersistentTerminal(ws: ServerWebSocket<WSData>) {
       send(ws, { type: 'terminal-output', sessionId, data })
     },
     onExit: () => {
+      // Guard: skip if this proxy was already replaced (e.g. by SSH proxy)
+      if (ws.data.terminal !== terminal) return
       const sessionId = ws.data.currentSessionId
       ws.data.currentSessionId = null
       ws.data.currentTmuxTarget = null
@@ -1490,6 +1834,101 @@ async function ensurePersistentTerminal(
   }
 }
 
+async function ensureCorrectProxyType(
+  ws: ServerWebSocket<WSData>,
+  session: Session
+): Promise<ITerminalProxy | null> {
+  const needsSsh = session.remote === true && !!session.host
+  const currentHost = ws.data.terminalHost
+
+  // Same type — reuse existing proxy
+  if (!needsSsh && !currentHost) {
+    return ensurePersistentTerminal(ws)
+  }
+  if (needsSsh && currentHost === session.host) {
+    if (ws.data.terminal) {
+      try {
+        await ws.data.terminal.start()
+        return ws.data.terminal
+      } catch (error) {
+        handleTerminalError(ws, ws.data.currentSessionId, error, 'ERR_TMUX_ATTACH_FAILED')
+        ws.data.terminal = null
+        ws.data.terminalHost = null
+        return null
+      }
+    }
+  }
+
+  // Type mismatch — dispose old proxy and create new one
+  if (ws.data.terminal) {
+    const oldTerminal = ws.data.terminal
+    // Clear references BEFORE dispose so the onExit guard sees the proxy was replaced
+    // (dispose triggers process exit → onExit callback, which checks ws.data.terminal !== terminal)
+    ws.data.terminal = null
+    ws.data.terminalHost = null
+    ws.data.currentSessionId = null
+    ws.data.currentTmuxTarget = null
+    await oldTerminal.dispose()
+  }
+
+  if (needsSsh) {
+    return createAndStartSshProxy(ws, session.host!)
+  } else {
+    return ensurePersistentTerminal(ws)
+  }
+}
+
+function createAndStartSshProxy(
+  ws: ServerWebSocket<WSData>,
+  host: string
+): Promise<ITerminalProxy | null> {
+  const sshOptions = sshOptionsForHost()
+  const sessionName = `${config.tmuxSession}-ws-${ws.data.connectionId}`
+
+  const terminal = new SshTerminalProxy({
+    connectionId: ws.data.connectionId,
+    sessionName,
+    baseSession: '', // not used for SSH standalone sessions
+    host,
+    sshOptions,
+    commandTimeoutMs: config.remoteTimeoutMs,
+    onData: (data) => {
+      const sessionId = ws.data.currentSessionId
+      if (!sessionId) return
+      send(ws, { type: 'terminal-output', sessionId, data })
+    },
+    onExit: () => {
+      // Guard: skip if this proxy was already replaced
+      if (ws.data.terminal !== terminal) return
+      const sessionId = ws.data.currentSessionId
+      logger.warn('ssh_proxy_onExit', {
+        sessionName,
+        sessionId,
+        host,
+        connectionId: ws.data.connectionId,
+      })
+      ws.data.currentSessionId = null
+      ws.data.currentTmuxTarget = null
+      ws.data.terminal = null
+      ws.data.terminalHost = null
+      void terminal.dispose()
+      if (sockets.has(ws)) {
+        sendTerminalError(ws, sessionId, 'ERR_TMUX_ATTACH_FAILED', 'SSH tmux client exited', true)
+      }
+    },
+  })
+
+  ws.data.terminal = terminal
+  ws.data.terminalHost = host
+
+  return terminal.start().then(() => terminal).catch((error) => {
+    handleTerminalError(ws, ws.data.currentSessionId, error, 'ERR_TMUX_ATTACH_FAILED')
+    ws.data.terminal = null
+    ws.data.terminalHost = null
+    return null
+  })
+}
+
 async function attachTerminalPersistent(
   ws: ServerWebSocket<WSData>,
   message: Extract<ClientMessage, { type: 'terminal-attach' }>
@@ -1506,7 +1945,7 @@ async function attachTerminalPersistent(
     sendTerminalError(ws, sessionId, 'ERR_INVALID_WINDOW', 'Session not found', false)
     return
   }
-  if (session.remote) {
+  if (session.remote && !config.remoteAllowAttach) {
     const host = session.host ? ` on ${session.host}` : ''
     sendTerminalError(ws, sessionId, 'ERR_INVALID_WINDOW', `Remote session${host} is read-only`, false)
     return
@@ -1518,7 +1957,7 @@ async function attachTerminalPersistent(
     return
   }
 
-  const terminal = await ensurePersistentTerminal(ws)
+  const terminal = await ensureCorrectProxyType(ws, session)
   if (!terminal) {
     return
   }
@@ -1528,7 +1967,9 @@ async function attachTerminalPersistent(
   }
 
   // Capture scrollback history BEFORE switching to avoid race with live output
-  const history = captureTmuxHistory(target)
+  const history = session.remote && session.host
+    ? await captureTmuxHistoryRemote(target, session.host)
+    : captureTmuxHistory(target)
 
   try {
     await terminal.switchTo(target, () => {
@@ -1541,8 +1982,15 @@ async function attachTerminalPersistent(
     })
     ws.data.currentSessionId = sessionId
     ws.data.currentTmuxTarget = target
+    logger.info('terminal_ready_sent', { sessionId, target, connectionId: ws.data.connectionId })
     send(ws, { type: 'terminal-ready', sessionId })
   } catch (error) {
+    logger.warn('terminal_switch_failed', {
+      sessionId,
+      target,
+      error: error instanceof Error ? error.message : String(error),
+      connectionId: ws.data.connectionId,
+    })
     handleTerminalError(ws, sessionId, error, 'ERR_TMUX_SWITCH_FAILED')
   }
 }
@@ -1568,6 +2016,65 @@ function captureTmuxHistory(target: string): string | null {
   }
 }
 
+function sshOptionsForHost(): string[] {
+  return [
+    '-o', 'BatchMode=yes',
+    '-o', 'ConnectTimeout=3',
+    // Avoid using stale multiplex control sockets for control-plane commands.
+    // Users can still enable multiplexing for poller connections via ~/.ssh/config.
+    '-o', 'ControlMaster=no',
+    '-o', 'ControlPath=none',
+    ...splitSshOptions(config.remoteSshOpts),
+  ]
+}
+
+async function runRemoteTmux(host: string, args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const remoteCmd = `tmux ${args.map(a => shellQuote(a)).join(' ')}`
+  const opts = sshOptionsForHost()
+  const proc = Bun.spawn(['ssh', ...opts, host, remoteCmd], { stdout: 'pipe', stderr: 'pipe' })
+
+  const timeout = setTimeout(() => { try { proc.kill() } catch {} }, 10_000)
+  try {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout!).text(),
+      new Response(proc.stderr!).text(),
+    ])
+    return { exitCode, stdout, stderr }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function runRemoteSsh(host: string, remoteCmd: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const opts = sshOptionsForHost()
+  const proc = Bun.spawn(['ssh', ...opts, host, remoteCmd], { stdout: 'pipe', stderr: 'pipe' })
+
+  const timeout = setTimeout(() => { try { proc.kill() } catch {} }, 10_000)
+  try {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout!).text(),
+      new Response(proc.stderr!).text(),
+    ])
+    return { exitCode, stdout, stderr }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function captureTmuxHistoryRemote(target: string, host: string): Promise<string | null> {
+  try {
+    const result = await runRemoteTmux(host, ['capture-pane', '-t', target, '-p', '-S', '-', '-E', '-', '-J'])
+    if (result.exitCode !== 0) return null
+    const output = result.stdout ?? ''
+    if (output.trim().length === 0) return null
+    return output
+  } catch {
+    return null
+  }
+}
+
 function detachTerminalPersistent(ws: ServerWebSocket<WSData>, sessionId: string) {
   if (ws.data.currentSessionId === sessionId) {
     ws.data.currentSessionId = null
@@ -1583,13 +2090,19 @@ function handleTerminalInputPersistent(
   if (sessionId !== ws.data.currentSessionId) {
     return
   }
+
+  const session = registry.get(sessionId)
+  if (session?.remote && !config.remoteAllowAttach) return
+
   ws.data.terminal?.write(data)
 
   // On Enter key: immediately set "working" status and schedule refresh
   if (data.includes('\r') || data.includes('\n')) {
-    setForceWorking(sessionId)
-    scheduleEnterRefresh()
-    scheduleLastUserMessageCapture(sessionId)
+    if (!session?.remote) {
+      setForceWorking(sessionId)
+      scheduleEnterRefresh()
+      scheduleLastUserMessageCapture(sessionId)
+    }
   }
 }
 
@@ -1602,6 +2115,10 @@ function handleTerminalResizePersistent(
   if (sessionId !== ws.data.currentSessionId) {
     return
   }
+
+  const session = registry.get(sessionId)
+  if (session?.remote && !config.remoteAllowAttach) return
+
   ws.data.terminal?.resize(cols, rows)
 }
 
@@ -1613,6 +2130,13 @@ function sendTerminalError(
   message: string,
   retryable: boolean
 ) {
+  logger.warn('sending_terminal_error', {
+    sessionId,
+    code,
+    message,
+    retryable,
+    connectionId: ws.data.connectionId,
+  })
   send(ws, {
     type: 'terminal-error',
     sessionId,

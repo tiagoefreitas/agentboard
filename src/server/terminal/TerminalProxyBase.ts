@@ -127,7 +127,7 @@ abstract class TerminalProxyBase implements ITerminalProxy {
   abstract resize(cols: number, rows: number): void
   abstract dispose(): Promise<void>
   abstract getClientTty(): string | null
-  abstract getMode(): 'pty' | 'pipe-pane'
+  abstract getMode(): 'pty' | 'pipe-pane' | 'ssh'
 }
 
 function extractWindowId(target: string): string {

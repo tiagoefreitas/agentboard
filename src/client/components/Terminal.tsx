@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import type { AgentSession, Session, SendClientMessage, SubscribeServerMessage } from '@shared/types'
-import type { ConnectionStatus } from '../stores/sessionStore'
+import { useSessionStore, type ConnectionStatus } from '../stores/sessionStore'
 import { useTerminal } from '../hooks/useTerminal'
 import { useIsMobileLayout } from '../hooks/useMobileLayout'
 import { useOnClickOutside } from '../hooks/useOnClickOutside'
@@ -113,11 +113,15 @@ export default function Terminal({
   const renameInputRef = useRef<HTMLInputElement>(null)
   const endSessionButtonRef = useRef<HTMLButtonElement>(null)
   const isRemoteSession = session?.remote === true
+  const remoteAllowControl = useSessionStore((s) => s.remoteAllowControl)
+  const remoteAllowAttach = useSessionStore((s) => s.remoteAllowAttach)
+  const isReadOnly = isRemoteSession && !remoteAllowAttach
+  const canControl = !isRemoteSession || (remoteAllowControl && session?.source === 'managed')
 
   const { containerRef, terminalRef, inTmuxCopyModeRef, setTmuxCopyMode } = useTerminal({
     sessionId: session?.id ?? null,
     tmuxTarget: session?.tmuxWindow ?? null,
-    allowAttach: !isRemoteSession,
+    allowAttach: !isReadOnly,
     sendMessage,
     subscribe,
     theme: terminalTheme,
@@ -133,11 +137,11 @@ export default function Terminal({
 
   const scrollToBottom = useCallback(() => {
     // Exit tmux copy-mode to return to live output (oracle recommendation)
-    if (!session || isRemoteSession) return
+    if (!session || isReadOnly) return
     sendMessage({ type: 'tmux-cancel-copy-mode', sessionId: session.id })
     setTmuxCopyMode(false)
     terminalRef.current?.scrollToBottom()
-  }, [session, isRemoteSession, sendMessage, setTmuxCopyMode, terminalRef])
+  }, [session, isReadOnly, sendMessage, setTmuxCopyMode, terminalRef])
 
   // Edge swipe to open drawer
   const handleOpenDrawer = useCallback(() => {
@@ -784,10 +788,10 @@ export default function Terminal({
 
   const handleSendKey = useCallback(
     (key: string) => {
-      if (!session || isRemoteSession) return
+      if (!session || isReadOnly) return
       sendMessage({ type: 'terminal-input', sessionId: session.id, data: key })
     },
-    [session, isRemoteSession, sendMessage]
+    [session, isReadOnly, sendMessage]
   )
 
   const handleRefocus = useCallback(() => {
@@ -802,7 +806,7 @@ export default function Terminal({
 
   // Enter text mode: exit copy-mode and focus input (for keyboard button)
   const handleEnterTextMode = useCallback(() => {
-    if (!session || isRemoteSession) return
+    if (!session || isReadOnly) return
     if (inTmuxCopyModeRef.current) {
       sendMessage({ type: 'tmux-cancel-copy-mode', sessionId: session.id })
       setTmuxCopyMode(false)
@@ -814,7 +818,7 @@ export default function Terminal({
       textarea.removeAttribute('disabled')
       textarea.focus()
     }
-  }, [session, sendMessage, containerRef, inTmuxCopyModeRef, setTmuxCopyMode])
+  }, [session, isReadOnly, sendMessage, containerRef, inTmuxCopyModeRef, setTmuxCopyMode])
 
   const isKeyboardVisible = useCallback(() => {
     if (typeof document === 'undefined') return false
@@ -887,7 +891,7 @@ export default function Terminal({
             <Menu01Icon width={16} height={16} />
           </button>
           {/* Kill session button - desktop only, left of session name */}
-          {session && !isRemoteSession && (
+          {session && canControl && (
             <button
               onClick={() => setShowEndConfirm(true)}
               className="hidden md:flex h-7 w-7 items-center justify-center rounded bg-danger/10 border border-danger/30 text-danger hover:bg-danger/20 active:scale-95 transition-all shrink-0"
@@ -943,7 +947,7 @@ export default function Terminal({
           </button>
 
           {/* Kill session button - mobile only (desktop has it on left) */}
-          {session && !isRemoteSession && (
+          {session && canControl && (
             <button
               onClick={() => setShowEndConfirm(true)}
               className="flex md:hidden h-7 w-7 items-center justify-center rounded bg-danger/10 border border-danger/30 text-danger hover:bg-danger/20 active:scale-95 transition-all"
@@ -968,7 +972,7 @@ export default function Terminal({
 
               {showMoreMenu && (
                 <div className="absolute right-0 top-full mt-1 z-20 min-w-[140px] rounded-md border border-border bg-elevated shadow-lg py-1">
-                  {!isRemoteSession && (
+                  {canControl && (
                     <button
                       onClick={handleStartRename}
                       className="w-full px-3 py-2 text-left text-sm text-secondary hover:bg-hover hover:text-primary flex items-center gap-2"
@@ -1038,7 +1042,7 @@ export default function Terminal({
             Select a session to view terminal
           </div>
         )}
-        {session && isRemoteSession && (
+        {session && isReadOnly && (
           <div className="absolute inset-0 flex items-center justify-center text-center text-sm text-muted">
             Remote session (read-only). Use SSH to attach on the host.
           </div>
@@ -1076,7 +1080,7 @@ export default function Terminal({
       {session && (
         <TerminalControls
           onSendKey={handleSendKey}
-          disabled={connectionStatus !== 'connected' || isRemoteSession}
+          disabled={connectionStatus !== 'connected' || isReadOnly}
           sessions={sessions.map(s => ({ id: s.id, name: s.name, status: s.status }))}
           currentSessionId={session.id}
           onSelectSession={onSelectSession}

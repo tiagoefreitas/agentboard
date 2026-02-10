@@ -27,6 +27,9 @@ interface ServerInfo {
 
 export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [newSessionInitialHost, setNewSessionInitialHost] = useState<string | undefined>(undefined)
+  const [newSessionInitialPath, setNewSessionInitialPath] = useState<string | undefined>(undefined)
+  const [newSessionInitialCommand, setNewSessionInitialCommand] = useState<string | undefined>(undefined)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null)
@@ -50,6 +53,12 @@ export default function App() {
   const connectionError = useSessionStore((state) => state.connectionError)
   const clearExitingSession = useSessionStore((state) => state.clearExitingSession)
   const markSessionExiting = useSessionStore((state) => state.markSessionExiting)
+  const setRemoteAllowControl = useSessionStore((state) => state.setRemoteAllowControl)
+  const setRemoteAllowAttach = useSessionStore((state) => state.setRemoteAllowAttach)
+  const setHostLabel = useSessionStore((state) => state.setHostLabel)
+  const hostStatuses = useSessionStore((state) => state.hostStatuses)
+  const remoteAllowControl = useSessionStore((state) => state.remoteAllowControl)
+  const hostLabel = useSessionStore((state) => state.hostLabel)
 
   const theme = useThemeStore((state) => state.theme)
   const defaultProjectDir = useSettingsStore(
@@ -163,6 +172,11 @@ export default function App() {
       }
       if (message.type === 'host-status') {
         setHostStatuses(message.hosts)
+      }
+      if (message.type === 'server-config') {
+        setRemoteAllowControl(message.remoteAllowControl)
+        setRemoteAllowAttach(message.remoteAllowAttach)
+        setHostLabel(message.hostLabel)
       }
       if (message.type === 'session-update') {
         // Detect status transitions for sound notifications
@@ -283,6 +297,9 @@ export default function App() {
     setSessions,
     setAgentSessions,
     setHostStatuses,
+    setRemoteAllowControl,
+    setRemoteAllowAttach,
+    setHostLabel,
     subscribe,
     updateSession,
   ])
@@ -295,10 +312,10 @@ export default function App() {
 
   // Track last viewed project path
   useEffect(() => {
-    if (selectedSession?.projectPath) {
+    if (selectedSession?.projectPath && !selectedSession.remote) {
       setLastProjectPath(selectedSession.projectPath)
     }
-  }, [selectedSession?.projectPath, setLastProjectPath])
+  }, [selectedSession?.projectPath, selectedSession?.remote, setLastProjectPath])
 
   const sessionSortMode = useSettingsStore((state) => state.sessionSortMode)
   const sessionSortDirection = useSettingsStore(
@@ -406,16 +423,22 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isModalOpen, selectedSessionId, setSelectedSessionId, filteredSortedSessions, handleKillSession, shortcutModifier])
 
-  const handleNewSession = () => setIsModalOpen(true)
+  const handleNewSession = () => {
+    setNewSessionInitialHost(undefined)
+    setNewSessionInitialPath(undefined)
+    setNewSessionInitialCommand(undefined)
+    setIsModalOpen(true)
+  }
   const handleOpenSettings = () => setIsSettingsOpen(true)
 
   const handleCreateSession = (
     projectPath: string,
     name?: string,
-    command?: string
+    command?: string,
+    host?: string
   ) => {
-    sendMessage({ type: 'session-create', projectPath, name, command })
-    setLastProjectPath(projectPath)
+    sendMessage({ type: 'session-create', projectPath, name, command, host })
+    if (!host) setLastProjectPath(projectPath)
   }
 
   const handleResumeSession = (sessionId: string) => {
@@ -428,9 +451,13 @@ export default function App() {
 
   const handleDuplicateSession = useCallback((sessionId: string) => {
     const session = sessions.find((s) => s.id === sessionId)
-    if (session) {
-      sendMessage({ type: 'session-create', projectPath: session.projectPath, command: session.command })
-    }
+    if (!session) return
+    sendMessage({
+      type: 'session-create',
+      projectPath: session.projectPath,
+      command: session.command || undefined,
+      host: session.remote && session.host ? session.host : undefined,
+    })
   }, [sessions, sendMessage])
 
   const handleSetPinned = useCallback((sessionId: string, isPinned: boolean) => {
@@ -449,6 +476,11 @@ export default function App() {
       .then((info: ServerInfo) => setServerInfo(info))
       .catch(() => {})
   }, [])
+
+  const remoteHostStatuses = useMemo(() => {
+    if (!hostLabel) return hostStatuses
+    return hostStatuses.filter((hostStatus) => hostStatus.host !== hostLabel)
+  }, [hostStatuses, hostLabel])
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -512,7 +544,12 @@ export default function App() {
         commandPresets={commandPresets}
         defaultPresetId={defaultPresetId}
         lastProjectPath={lastProjectPath}
-        activeProjectPath={selectedSession?.projectPath}
+        activeProjectPath={selectedSession && !selectedSession.remote ? selectedSession.projectPath : undefined}
+        remoteHosts={remoteHostStatuses}
+        remoteAllowControl={remoteAllowControl}
+        initialHost={newSessionInitialHost}
+        initialPath={newSessionInitialPath}
+        initialCommand={newSessionInitialCommand}
       />
 
       <SettingsModal

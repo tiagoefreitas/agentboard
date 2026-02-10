@@ -44,6 +44,9 @@ interface TerminalProxyOptions {
   now?: () => number
   wait?: WaitFn
   monitorTargets?: boolean
+  host?: string
+  sshOptions?: string[]
+  commandTimeoutMs?: number
 }
 
 interface ITerminalProxy {
@@ -56,7 +59,7 @@ interface ITerminalProxy {
   getClientTty(): string | null
   getCurrentWindow(): string | null
   getSessionName(): string
-  getMode(): 'pty' | 'pipe-pane'
+  getMode(): 'pty' | 'pipe-pane' | 'ssh'
 }
 
 export type {
