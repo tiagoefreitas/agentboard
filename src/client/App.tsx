@@ -17,7 +17,7 @@ import { useWebSocket } from './hooks/useWebSocket'
 import { useVisualViewport } from './hooks/useVisualViewport'
 import { sortSessions } from './utils/sessions'
 import { getEffectiveModifier, matchesModifier } from './utils/device'
-import { playPermissionSound, playIdleSound, primeAudio } from './utils/sound'
+import { playPermissionSound, playIdleSound, primeAudio, needsUserGesture } from './utils/sound'
 
 interface ServerInfo {
   port: number
@@ -84,21 +84,23 @@ export default function App() {
   // Handle mobile keyboard viewport adjustments
   useVisualViewport()
 
-  // Prime audio on first user interaction (required for Safari/iOS autoplay policy)
+  // Prime audio on user interaction. Persistent listener (not once) because Safari
+  // suspends AudioContext after sleep/wake and needs a fresh gesture to resume.
   useEffect(() => {
     if (typeof document === 'undefined') return
     if (!soundOnPermission && !soundOnIdle) return
 
+    let primed = false
     const unlockAudio = () => {
+      // After initial prime, only re-prime when wake detection flags it
+      if (primed && !needsUserGesture()) return
+      primed = true
       void primeAudio()
-      document.removeEventListener('click', unlockAudio)
-      document.removeEventListener('keydown', unlockAudio)
-      document.removeEventListener('touchstart', unlockAudio)
     }
 
-    document.addEventListener('click', unlockAudio, { once: true, passive: true })
-    document.addEventListener('keydown', unlockAudio, { once: true, passive: true })
-    document.addEventListener('touchstart', unlockAudio, { once: true, passive: true })
+    document.addEventListener('click', unlockAudio, { passive: true })
+    document.addEventListener('keydown', unlockAudio, { passive: true })
+    document.addEventListener('touchstart', unlockAudio, { passive: true })
 
     return () => {
       document.removeEventListener('click', unlockAudio)

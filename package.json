@@ -1,8 +1,8 @@
 {
   "name": "@gbasin/agentboard",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
-  "description": "A terminal dashboard for tracking agent coding sessions",
+  "description": "Web GUI for tmux optimized for AI agent TUIs",
   "author": "gbasin",
   "license": "MIT",
   "repository": {

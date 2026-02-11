@@ -6,6 +6,11 @@
 // Lazy AudioContext singleton
 let audioContext: AudioContext | null = null
 
+// After sleep/wake, Safari's AudioContext can go zombie (reports "running" but
+// produces no audio) or suspended (needs a fresh user gesture to resume).
+// This flag tells App.tsx to re-register user-gesture listeners.
+let _needsUserGesture = false
+
 // Rate limiting: track last play time per sound type
 const lastPlayTime: Record<string, number> = {}
 const RATE_LIMIT_MS = 500 // Minimum ms between same sound type
@@ -28,9 +33,8 @@ function getAudioContext(): AudioContext | null {
 }
 
 /**
- * Force-recreate the AudioContext. Safari's context can become a zombie after
- * sleep/wake — it reports state==="running" but produces no audio. Closing and
- * recreating is the only reliable fix.
+ * Close and recreate the AudioContext. Safari's context can become a zombie
+ * after sleep/wake — reports state==="running" but produces no audio.
  */
 function recreateAudioContext(): void {
   if (audioContext) {
@@ -40,28 +44,40 @@ function recreateAudioContext(): void {
   getAudioContext()
 }
 
-// Recreate context on wake from sleep. Safari's AudioContext goes zombie after
-// sleep — reports "running" but produces no audio. The pageshow event (with
-// persisted=true for bfcache) and the resume event both fire after wake.
+export function needsUserGesture(): boolean {
+  return _needsUserGesture
+}
+
+// Recover audio after sleep/wake.
+function handleWakeDetected(): void {
+  if (!audioContext) return
+  // Always recreate — after real sleep the context is either zombie or suspended
+  recreateAudioContext()
+  _needsUserGesture = true
+}
+
 if (typeof window !== 'undefined') {
   // 'pageshow' fires on bfcache restore and some wake scenarios
   window.addEventListener('pageshow', (e) => {
-    if (e.persisted) recreateAudioContext()
+    if (e.persisted) handleWakeDetected()
   })
 
-  // Visibility change is the most reliable wake signal on desktop Safari
+  // Visibility change catches most desktop Safari wake scenarios
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && audioContext) {
-      // Test if context is zombie: schedule a silent buffer and check if
-      // currentTime advances. If not, recreate.
-      const before = audioContext.currentTime
-      setTimeout(() => {
-        if (audioContext && audioContext.currentTime === before && audioContext.state === 'running') {
-          recreateAudioContext()
-        }
-      }, 200)
-    }
+    if (document.visibilityState === 'visible') handleWakeDetected()
   })
+
+  // Time-jump detection: catches ALL wake scenarios including ones that don't
+  // fire visibilitychange (Power Nap, external display wake, etc.).
+  // Polls every 5s; if >15s elapsed, the machine almost certainly slept.
+  let lastTick = Date.now()
+  setInterval(() => {
+    const now = Date.now()
+    if (now - lastTick > 15_000) {
+      handleWakeDetected()
+    }
+    lastTick = now
+  }, 5_000)
 }
 
 /**
@@ -73,6 +89,7 @@ export async function primeAudio(): Promise<void> {
   if (ctx && ctx.state === 'suspended') {
     await ctx.resume().catch(() => {})
   }
+  _needsUserGesture = false
 }
 
 async function ensureRunning(ctx: AudioContext): Promise<void> {
