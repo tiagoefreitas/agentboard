@@ -1975,12 +1975,12 @@ async function createAndStartSshProxy(
   try {
     await terminal.start()
     if (!isTerminalAttachCurrent(ws, attachSeq) || ws.data.terminal !== terminal) {
-      // Stale or replaced — clean up references before disposing.
-      if (ws.data.terminal === terminal) {
-        ws.data.terminal = null
-        ws.data.terminalHost = null
+      // Only dispose if the terminal has been replaced by a newer attach.
+      // If ws.data.terminal still references this proxy, a newer attach is
+      // reusing it (e.g. same SSH host) — disposing would break that attach.
+      if (ws.data.terminal !== terminal) {
+        await terminal.dispose()
       }
-      await terminal.dispose()
       return null
     }
     return terminal
