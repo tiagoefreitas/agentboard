@@ -384,6 +384,7 @@ function createWs() {
       currentTmuxTarget: null as string | null,
       connectionId: 'ws-test',
       terminalHost: null as string | null,
+      terminalAttachSeq: 0,
     },
     send: (payload: string) => {
       sent.push(JSON.parse(payload) as ServerMessage)
