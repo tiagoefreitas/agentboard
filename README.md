@@ -57,6 +57,14 @@ Run your desktop/server, then connect from your phone or laptop over Tailscale/L
 
 ## Install
 
+### Homebrew
+
+```bash
+brew tap gbasin/tap
+brew install agentboard
+agentboard
+```
+
 ### npm
 
 ```bash
