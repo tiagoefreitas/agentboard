@@ -64,6 +64,7 @@ beforeEach(() => {
     showSessionIdPrefix: false,
     projectFilters: [],
     hostFilters: [],
+    hiddenSessionPrefix: 'client-',
   })
 })
 
@@ -76,6 +77,7 @@ describe('useSettingsStore', () => {
     expect(state.recentPaths).toEqual([])
     expect(state.projectFilters).toEqual([])
     expect(state.hostFilters).toEqual([])
+    expect(state.hiddenSessionPrefix).toBe('client-')
   })
 
   test('updates default project dir', () => {

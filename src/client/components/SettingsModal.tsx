@@ -79,6 +79,12 @@ export default function SettingsModal({
   const setShowSessionIdPrefix = useSettingsStore(
     (state) => state.setShowSessionIdPrefix
   )
+  const hiddenSessionPrefix = useSettingsStore(
+    (state) => state.hiddenSessionPrefix
+  )
+  const setHiddenSessionPrefix = useSettingsStore(
+    (state) => state.setHiddenSessionPrefix
+  )
   const theme = useThemeStore((state) => state.theme)
   const setTheme = useThemeStore((state) => state.setTheme)
   const soundOnPermission = useSettingsStore((state) => state.soundOnPermission)
@@ -109,6 +115,9 @@ export default function SettingsModal({
   )
   const [draftShowSessionIdPrefix, setDraftShowSessionIdSuffix] = useState(
     showSessionIdPrefix
+  )
+  const [draftHiddenSessionPrefix, setDraftHiddenSessionPrefix] = useState(
+    hiddenSessionPrefix
   )
   const [draftTheme, setDraftTheme] = useState<Theme>(theme)
   const [draftSoundOnPermission, setDraftSoundOnPermission] = useState(soundOnPermission)
@@ -149,6 +158,7 @@ export default function SettingsModal({
       setDraftShowProjectName(showProjectName)
       setDraftShowLastUserMessage(showLastUserMessage)
       setDraftShowSessionIdSuffix(showSessionIdPrefix)
+      setDraftHiddenSessionPrefix(hiddenSessionPrefix)
       setDraftTheme(theme)
       setDraftSoundOnPermission(soundOnPermission)
       setDraftSoundOnIdle(soundOnIdle)
@@ -210,6 +220,7 @@ export default function SettingsModal({
     showProjectName,
     showLastUserMessage,
     showSessionIdPrefix,
+    hiddenSessionPrefix,
     theme,
     soundOnPermission,
     soundOnIdle,
@@ -254,6 +265,7 @@ export default function SettingsModal({
     setShowProjectName(draftShowProjectName)
     setShowLastUserMessage(draftShowLastUserMessage)
     setShowSessionIdPrefix(draftShowSessionIdPrefix)
+    setHiddenSessionPrefix(draftHiddenSessionPrefix)
     setTheme(draftTheme)
     setSoundOnPermission(draftSoundOnPermission)
     setSoundOnIdle(draftSoundOnIdle)
@@ -557,6 +569,18 @@ export default function SettingsModal({
             <label className="mb-1 block text-xs text-secondary">
               Session List Details
             </label>
+            <div>
+              <div className="text-sm text-primary">Hide Session Prefix</div>
+              <div className="text-[10px] text-muted mb-1.5">
+                Hide sessions whose name starts with this prefix. Leave empty to disable.
+              </div>
+              <input
+                value={draftHiddenSessionPrefix}
+                onChange={(event) => setDraftHiddenSessionPrefix(event.target.value)}
+                className="input text-xs py-1 px-2 font-mono w-full"
+                placeholder="client-"
+              />
+            </div>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-primary">Project Name</div>

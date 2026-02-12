@@ -76,6 +76,7 @@ export default function App() {
   const setSidebarWidth = useSettingsStore((state) => state.setSidebarWidth)
   const projectFilters = useSettingsStore((state) => state.projectFilters)
   const hostFilters = useSettingsStore((state) => state.hostFilters)
+  const hiddenSessionPrefix = useSettingsStore((state) => state.hiddenSessionPrefix)
   const soundOnPermission = useSettingsStore((state) => state.soundOnPermission)
   const soundOnIdle = useSettingsStore((state) => state.soundOnIdle)
 
@@ -340,6 +341,9 @@ export default function App() {
   // Apply filters to sorted sessions for keyboard navigation
   const filteredSortedSessions = useMemo(() => {
     let next = sortedSessions
+    if (hiddenSessionPrefix) {
+      next = next.filter((session) => !session.name.startsWith(hiddenSessionPrefix))
+    }
     if (projectFilters.length > 0) {
       next = next.filter((session) => projectFilters.includes(session.projectPath))
     }
@@ -347,7 +351,7 @@ export default function App() {
       next = next.filter((session) => hostFilters.includes(session.host ?? ''))
     }
     return next
-  }, [sortedSessions, projectFilters, hostFilters])
+  }, [sortedSessions, hiddenSessionPrefix, projectFilters, hostFilters])
 
   // Auto-select first visible session when current selection is filtered out
   useEffect(() => {
@@ -363,10 +367,10 @@ export default function App() {
   // Auto-select first session on mobile when sessions load
   useEffect(() => {
     const isMobile = window.matchMedia('(max-width: 767px)').matches
-    if (isMobile && hasLoaded && selectedSessionId === null && sortedSessions.length > 0) {
-      setSelectedSessionId(sortedSessions[0].id)
+    if (isMobile && hasLoaded && selectedSessionId === null && filteredSortedSessions.length > 0) {
+      setSelectedSessionId(filteredSortedSessions[0].id)
     }
-  }, [hasLoaded, selectedSessionId, sortedSessions, setSelectedSessionId])
+  }, [hasLoaded, selectedSessionId, filteredSortedSessions, setSelectedSessionId])
 
   const handleKillSession = useCallback((sessionId: string) => {
     // Mark as exiting before sending kill to preserve session data for exit animation
