@@ -17,7 +17,7 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    command: `bun run build && PORT=${port} TMUX_SESSION=${tmuxSession} bun src/server/index.ts`,
+    command: `[ -d dist/client ] || bun run build && PORT=${port} TMUX_SESSION=${tmuxSession} bun src/server/index.ts`,
     url: `http://localhost:${port}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120000,
