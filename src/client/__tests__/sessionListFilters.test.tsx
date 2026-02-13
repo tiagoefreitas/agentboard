@@ -33,6 +33,7 @@ beforeEach(() => {
     showSessionIdPrefix: false,
     projectFilters: [],
     hostFilters: [],
+    hiddenSessionPrefix: 'client-',
   })
 
   useSessionStore.setState({
@@ -52,6 +53,7 @@ afterEach(() => {
     showSessionIdPrefix: false,
     projectFilters: [],
     hostFilters: [],
+    hiddenSessionPrefix: 'client-',
   })
   useSessionStore.setState({
     exitingSessions: new Map(),
@@ -70,6 +72,43 @@ const baseSession: Session = {
 }
 
 describe('SessionList project filters', () => {
+  test('hides sessions with configured hidden prefix', () => {
+    useSettingsStore.setState({
+      projectFilters: [],
+      hostFilters: [],
+      hiddenSessionPrefix: 'client-',
+    })
+
+    const sessions: Session[] = [
+      { ...baseSession, id: 'visible', name: 'alpha', projectPath: '/tmp/visible', status: 'working' },
+      { ...baseSession, id: 'hidden', name: 'client-internal', projectPath: '/tmp/hidden', status: 'permission' },
+    ]
+
+    let renderer!: TestRenderer.ReactTestRenderer
+    act(() => {
+      renderer = TestRenderer.create(
+        <SessionList
+          sessions={sessions}
+          inactiveSessions={[]}
+          selectedSessionId={null}
+          loading={false}
+          error={null}
+          onSelect={() => {}}
+          onRename={() => {}}
+        />
+      )
+    })
+
+    const cards = renderer.root.findAllByProps({ 'data-testid': 'session-card' })
+    const cardIds = cards.map((card) => card.props['data-session-id'])
+
+    expect(cardIds).toEqual(['visible'])
+
+    act(() => {
+      renderer.unmount()
+    })
+  })
+
   test('marks hidden permission sessions when filters exclude them', () => {
     useSettingsStore.setState({ projectFilters: ['/tmp/visible'], hostFilters: [] })
 

@@ -8,6 +8,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { ProgressAddon } from '@xterm/addon-progress'
 import type { SendClientMessage, SubscribeServerMessage } from '@shared/types'
+import { withBasePath } from '../utils/basePath'
 
 // URL regex that matches standard URLs and IP:port patterns
 const URL_REGEX = /https?:\/\/[^\s"'<>]+|\b(?:localhost|\d{1,3}(?:\.\d{1,3}){3}):\d{1,5}(?:\/[^\s"'<>]*)?\b/
@@ -535,7 +536,7 @@ export function useTerminal({
             // Only hits the server when needed (no latency cost for normal text pastes).
             if (!text && getIsMac() && !isiOS) {
               try {
-                const res = await fetch('/api/clipboard-file-path')
+                const res = await fetch(withBasePath('/api/clipboard-file-path'))
                 if (res.ok) {
                   const { path } = (await res.json()) as { path: string | null }
                   if (path) {

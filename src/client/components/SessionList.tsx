@@ -170,6 +170,9 @@ export default function SessionList({
   const setProjectFilters = useSettingsStore((state) => state.setProjectFilters)
   const hostFilters = useSettingsStore((state) => state.hostFilters)
   const setHostFilters = useSettingsStore((state) => state.setHostFilters)
+  const hiddenSessionPrefix = useSettingsStore(
+    (state) => state.hiddenSessionPrefix
+  )
 
   // Get exiting sessions from store (for kill-failed rollback only)
   const exitingSessions = useSessionStore((state) => state.exitingSessions)
@@ -243,6 +246,9 @@ export default function SessionList({
 
   const filteredSessions = useMemo(() => {
     let next = sortedSessions
+    if (hiddenSessionPrefix) {
+      next = next.filter((session) => !session.name.startsWith(hiddenSessionPrefix))
+    }
     if (projectFilters.length > 0) {
       next = next.filter((session) => projectFilters.includes(session.projectPath))
     }
@@ -250,15 +256,16 @@ export default function SessionList({
       next = next.filter((session) => hostFilters.includes(session.host ?? ''))
     }
     return next
-  }, [sortedSessions, projectFilters, hostFilters])
+  }, [sortedSessions, hiddenSessionPrefix, projectFilters, hostFilters])
 
   const filterKey = useMemo(
     () => {
+      const nameKey = hiddenSessionPrefix ? `hidden-prefix:${hiddenSessionPrefix}` : 'all-names'
       const projectKey = projectFilters.length === 0 ? 'all-projects' : projectFilters.join('|')
       const hostKey = hostFilters.length === 0 ? 'all-hosts' : hostFilters.join('|')
-      return `${projectKey}::${hostKey}`
+      return `${nameKey}::${projectKey}::${hostKey}`
     },
-    [projectFilters, hostFilters]
+    [hiddenSessionPrefix, projectFilters, hostFilters]
   )
 
   // Track sessions that became visible due to filter changes (for entry animation)
@@ -297,6 +304,9 @@ export default function SessionList({
 
   const filteredInactiveSessions = useMemo(() => {
     let next = inactiveSessions
+    if (hiddenSessionPrefix) {
+      next = next.filter((session) => !session.displayName.startsWith(hiddenSessionPrefix))
+    }
     if (projectFilters.length > 0) {
       next = next.filter((session) => projectFilters.includes(session.projectPath))
     }
@@ -304,7 +314,7 @@ export default function SessionList({
       next = next.filter((session) => hostFilters.includes(session.host ?? ''))
     }
     return next
-  }, [inactiveSessions, projectFilters, hostFilters])
+  }, [inactiveSessions, hiddenSessionPrefix, projectFilters, hostFilters])
 
   const hiddenPermissionCount = useMemo(() => {
     if (projectFilters.length === 0) return 0

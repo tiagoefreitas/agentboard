@@ -13,6 +13,7 @@ import {
 import { useThemeStore, type Theme } from '../stores/themeStore'
 import { INACTIVE_MAX_AGE_MIN_HOURS, INACTIVE_MAX_AGE_MAX_HOURS } from '@shared/types'
 import { getEffectiveModifier, getModifierDisplay } from '../utils/device'
+import { withBasePath } from '../utils/basePath'
 import { Switch } from './Switch'
 import { playPermissionSound, playIdleSound, primeAudio } from '../utils/sound'
 
@@ -79,6 +80,12 @@ export default function SettingsModal({
   const setShowSessionIdPrefix = useSettingsStore(
     (state) => state.setShowSessionIdPrefix
   )
+  const hiddenSessionPrefix = useSettingsStore(
+    (state) => state.hiddenSessionPrefix
+  )
+  const setHiddenSessionPrefix = useSettingsStore(
+    (state) => state.setHiddenSessionPrefix
+  )
   const theme = useThemeStore((state) => state.theme)
   const setTheme = useThemeStore((state) => state.setTheme)
   const soundOnPermission = useSettingsStore((state) => state.soundOnPermission)
@@ -109,6 +116,9 @@ export default function SettingsModal({
   )
   const [draftShowSessionIdPrefix, setDraftShowSessionIdSuffix] = useState(
     showSessionIdPrefix
+  )
+  const [draftHiddenSessionPrefix, setDraftHiddenSessionPrefix] = useState(
+    hiddenSessionPrefix
   )
   const [draftTheme, setDraftTheme] = useState<Theme>(theme)
   const [draftSoundOnPermission, setDraftSoundOnPermission] = useState(soundOnPermission)
@@ -149,6 +159,7 @@ export default function SettingsModal({
       setDraftShowProjectName(showProjectName)
       setDraftShowLastUserMessage(showLastUserMessage)
       setDraftShowSessionIdSuffix(showSessionIdPrefix)
+      setDraftHiddenSessionPrefix(hiddenSessionPrefix)
       setDraftTheme(theme)
       setDraftSoundOnPermission(soundOnPermission)
       setDraftSoundOnIdle(soundOnIdle)
@@ -157,11 +168,11 @@ export default function SettingsModal({
       setNewCommand('')
       setNewAgentType('')
       // Fetch server-side settings
-      fetch('/api/settings/tmux-mouse-mode')
+      fetch(withBasePath('/api/settings/tmux-mouse-mode'))
         .then((res) => res.json())
         .then((data: { enabled: boolean }) => setTmuxMouseMode(data.enabled))
         .catch(() => {})
-      fetch('/api/settings/inactive-max-age-hours')
+      fetch(withBasePath('/api/settings/inactive-max-age-hours'))
         .then((res) => res.json())
         .then((data: { hours: number }) => setInactiveMaxAgeHours(data.hours))
         .catch(() => {})
@@ -210,6 +221,7 @@ export default function SettingsModal({
     showProjectName,
     showLastUserMessage,
     showSessionIdPrefix,
+    hiddenSessionPrefix,
     theme,
     soundOnPermission,
     soundOnIdle,
@@ -254,6 +266,7 @@ export default function SettingsModal({
     setShowProjectName(draftShowProjectName)
     setShowLastUserMessage(draftShowLastUserMessage)
     setShowSessionIdPrefix(draftShowSessionIdPrefix)
+    setHiddenSessionPrefix(draftHiddenSessionPrefix)
     setTheme(draftTheme)
     setSoundOnPermission(draftSoundOnPermission)
     setSoundOnIdle(draftSoundOnIdle)
@@ -303,7 +316,7 @@ export default function SettingsModal({
   const handleTmuxMouseModeChange = (enabled: boolean) => {
     setTmuxMouseModeLoading(true)
     setTmuxMouseMode(enabled)
-    fetch('/api/settings/tmux-mouse-mode', {
+    fetch(withBasePath('/api/settings/tmux-mouse-mode'), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
@@ -316,7 +329,7 @@ export default function SettingsModal({
     const prevHours = inactiveMaxAgeHours
     setInactiveMaxAgeHoursLoading(true)
     setInactiveMaxAgeHours(hours)
-    fetch('/api/settings/inactive-max-age-hours', {
+    fetch(withBasePath('/api/settings/inactive-max-age-hours'), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ hours }),
@@ -557,6 +570,18 @@ export default function SettingsModal({
             <label className="mb-1 block text-xs text-secondary">
               Session List Details
             </label>
+            <div>
+              <div className="text-sm text-primary">Hide Session Prefix</div>
+              <div className="text-[10px] text-muted mb-1.5">
+                Hide sessions whose name starts with this prefix. Leave empty to disable.
+              </div>
+              <input
+                value={draftHiddenSessionPrefix}
+                onChange={(event) => setDraftHiddenSessionPrefix(event.target.value)}
+                className="input text-xs py-1 px-2 font-mono w-full"
+                placeholder="client-"
+              />
+            </div>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-primary">Project Name</div>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ClientMessage, ServerMessage } from '@shared/types'
 import type { ConnectionStatus } from '../stores/sessionStore'
 import { useSessionStore } from '../stores/sessionStore'
+import { withBasePath } from '../utils/basePath'
 
 type MessageListener = (message: ServerMessage) => void
 
@@ -25,7 +26,7 @@ export class WebSocketManager {
     this.manualClose = false
     this.setStatus('connecting')
     const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const wsUrl = `${scheme}://${window.location.host}/ws`
+    const wsUrl = `${scheme}://${window.location.host}${withBasePath('/ws')}`
 
     const ws = new WebSocket(wsUrl)
     this.ws = ws

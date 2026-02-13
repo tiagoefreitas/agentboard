@@ -48,6 +48,7 @@ beforeEach(() => {
     showLastUserMessage: true,
     showSessionIdPrefix: false,
     hostFilters: [],
+    hiddenSessionPrefix: 'client-',
   })
   useThemeStore.setState({ theme: 'dark' })
 })
@@ -66,6 +67,7 @@ afterEach(() => {
     showLastUserMessage: true,
     showSessionIdPrefix: false,
     hostFilters: [],
+    hiddenSessionPrefix: 'client-',
   })
   useThemeStore.setState({ theme: 'dark' })
 })

@@ -11,6 +11,7 @@ import { CornerDownLeftIcon } from '@untitledui-icons/react/line'
 import DPad from './DPad'
 import NumPad from './NumPad'
 import { isIOSDevice } from '../utils/device'
+import { withBasePath } from '../utils/basePath'
 
 interface SessionInfo {
   id: string
@@ -205,7 +206,7 @@ export default function TerminalControls({
           try {
             const formData = new FormData()
             formData.append('image', blob, `paste.${item.type.split('/')[1] || 'png'}`)
-            const res = await fetch('/api/paste-image', { method: 'POST', body: formData })
+            const res = await fetch(withBasePath('/api/paste-image'), { method: 'POST', body: formData })
             if (res.ok) {
               const { path } = await res.json()
               onSendKey(path)
@@ -275,7 +276,7 @@ export default function TerminalControls({
           // Upload image to server
           const formData = new FormData()
           formData.append('image', blob, `paste.${imageType.split('/')[1] || 'png'}`)
-          const res = await fetch('/api/paste-image', { method: 'POST', body: formData })
+          const res = await fetch(withBasePath('/api/paste-image'), { method: 'POST', body: formData })
           if (res.ok) {
             const { path } = await res.json()
             // Send file path - Claude Code can reference images by path

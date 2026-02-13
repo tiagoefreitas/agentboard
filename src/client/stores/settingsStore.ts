@@ -149,6 +149,8 @@ interface SettingsState {
   setProjectFilters: (filters: string[]) => void
   hostFilters: string[]
   setHostFilters: (filters: string[]) => void
+  hiddenSessionPrefix: string
+  setHiddenSessionPrefix: (prefix: string) => void
   // Sound notifications
   soundOnPermission: boolean
   setSoundOnPermission: (enabled: boolean) => void
@@ -216,6 +218,9 @@ export const useSettingsStore = create<SettingsState>()(
       setProjectFilters: (filters) => set({ projectFilters: filters }),
       hostFilters: [],
       setHostFilters: (filters) => set({ hostFilters: filters }),
+      hiddenSessionPrefix: 'client-',
+      setHiddenSessionPrefix: (prefix) =>
+        set({ hiddenSessionPrefix: prefix.trim().slice(0, 128) }),
       // Sound notifications
       soundOnPermission: false,
       setSoundOnPermission: (enabled) => set({ soundOnPermission: enabled }),

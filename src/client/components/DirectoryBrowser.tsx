@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DirectoryListing } from '@shared/types'
 import { FolderIcon } from '@untitledui-icons/react/line'
 import { useSettingsStore } from '../stores/settingsStore'
+import { withBasePath } from '../utils/basePath'
 
 interface DirectoryBrowserProps {
   onSelect: (path: string) => void
@@ -36,7 +37,7 @@ export function DirectoryBrowser({
 
     try {
       const response = await fetch(
-        `/api/directories?path=${encodeURIComponent(path)}`,
+        withBasePath(`/api/directories?path=${encodeURIComponent(path)}`),
         { signal }
       )
       if (!response.ok) {

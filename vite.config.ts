@@ -28,6 +28,7 @@ export default defineConfig(({ mode }) => {
   const backendPort = env.PORT || '4040'
 
   return {
+    base: env.VITE_BASE_PATH || '/',
     plugins: [react()],
     resolve: {
       alias: {
