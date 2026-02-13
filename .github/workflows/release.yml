@@ -106,11 +106,14 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Collect binaries for GitHub Release
+      - name: Collect binaries and tarballs for GitHub Release
         run: |
           mkdir -p release-binaries
           for platform in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
             cp artifacts/agentboard-$platform/bin/agentboard release-binaries/agentboard-$platform
+            tar -czf release-binaries/agentboard-$platform.tar.gz \
+              -C artifacts/agentboard-$platform \
+              bin/agentboard dist/client
           done
 
       - name: Create GitHub Release
@@ -118,3 +121,84 @@ jobs:
         with:
           files: release-binaries/agentboard-*
           generate_release_notes: true
+
+      - name: Update Homebrew tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+
+          # Compute SHA256 for each platform tarball
+          declare -A SHAS
+          for platform in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            SHAS[$platform]=$(shasum -a 256 release-binaries/agentboard-$platform.tar.gz | cut -d' ' -f1)
+          done
+
+          # Clone the tap repo
+          git clone https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/gbasin/homebrew-tap.git tap
+          cd tap
+
+          # Generate the formula
+          cat > Formula/agentboard.rb << 'FORMULA'
+          # typed: strict
+          # frozen_string_literal: true
+
+          # Formula for agentboard - Web GUI for tmux optimized for AI agent TUIs
+          class Agentboard < Formula
+            desc "Web GUI for tmux optimized for AI agent TUIs"
+            homepage "https://github.com/gbasin/agentboard"
+          FORMULA
+
+          # Append version and platform blocks with real SHA256 values
+          cat >> Formula/agentboard.rb << EOF
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/gbasin/agentboard/releases/download/v${VERSION}/agentboard-darwin-arm64.tar.gz"
+                sha256 "${SHAS[darwin-arm64]}"
+              end
+              on_intel do
+                url "https://github.com/gbasin/agentboard/releases/download/v${VERSION}/agentboard-darwin-x64.tar.gz"
+                sha256 "${SHAS[darwin-x64]}"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "https://github.com/gbasin/agentboard/releases/download/v${VERSION}/agentboard-linux-arm64.tar.gz"
+                sha256 "${SHAS[linux-arm64]}"
+              end
+              on_intel do
+                url "https://github.com/gbasin/agentboard/releases/download/v${VERSION}/agentboard-linux-x64.tar.gz"
+                sha256 "${SHAS[linux-x64]}"
+              end
+            end
+
+            depends_on "tmux"
+
+            def install
+              libexec.install "bin/agentboard" => "agentboard"
+              chmod 0755, libexec/"agentboard"
+              (libexec/"dist").install "dist/client"
+
+              (bin/"agentboard").write <<~SHELL
+                #!/bin/bash
+                export AGENTBOARD_STATIC_DIR="#{libexec}/dist/client"
+                exec "#{libexec}/agentboard" "\\\$@"
+              SHELL
+              (bin/"agentboard").chmod 0755
+            end
+
+            test do
+              assert_predicate bin/"agentboard", :executable?
+            end
+          end
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/agentboard.rb
+          git commit -m "agentboard ${VERSION}"
+          git push
