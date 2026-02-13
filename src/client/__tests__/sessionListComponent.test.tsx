@@ -274,6 +274,40 @@ describe('SessionList component', () => {
     })
   })
 
+  test('renders agent session and tmux metadata chips', () => {
+    const sessionWithMeta: Session = {
+      ...baseSession,
+      id: 'session-meta',
+      agentSessionName: 'nice-birch',
+      tmuxWindow: '55:@204',
+    }
+
+    const renderer = TestRenderer.create(
+      <SessionList
+        sessions={[sessionWithMeta]}
+        selectedSessionId={null}
+        loading={false}
+        error={null}
+        onSelect={() => {}}
+        onRename={() => {}}
+      />
+    )
+
+    const agentMeta = renderer.root.findByProps({
+      'data-testid': 'session-agent-meta',
+    })
+    const tmuxMeta = renderer.root.findByProps({
+      'data-testid': 'session-tmux-meta',
+    })
+
+    expect(agentMeta.children.join('')).toBe('agent:nice-birch')
+    expect(tmuxMeta.children.join('')).toBe('tmux:55:@204')
+
+    act(() => {
+      renderer.unmount()
+    })
+  })
+
   test('refresh interval registers and clears on unmount', () => {
     const intervals: Array<{ id: number; delay: number }> = []
     const cleared: number[] = []

@@ -109,6 +109,45 @@ describe('SessionList project filters', () => {
     })
   })
 
+  test('handles missing display names safely when hidden prefix filter is active', () => {
+    useSettingsStore.setState({
+      projectFilters: [],
+      hostFilters: [],
+      hiddenSessionPrefix: 'client-',
+    })
+
+    const malformedSession = {
+      ...baseSession,
+      id: 'malformed',
+      name: undefined as unknown as string,
+      tmuxWindow: 'client-fallback:@22',
+      projectPath: '/tmp/malformed',
+      status: 'waiting',
+    } as unknown as Session
+
+    let renderer!: TestRenderer.ReactTestRenderer
+    act(() => {
+      renderer = TestRenderer.create(
+        <SessionList
+          sessions={[malformedSession]}
+          inactiveSessions={[]}
+          selectedSessionId={null}
+          loading={false}
+          error={null}
+          onSelect={() => {}}
+          onRename={() => {}}
+        />
+      )
+    })
+
+    const cards = renderer.root.findAllByProps({ 'data-testid': 'session-card' })
+    expect(cards).toHaveLength(0)
+
+    act(() => {
+      renderer.unmount()
+    })
+  })
+
   test('marks hidden permission sessions when filters exclude them', () => {
     useSettingsStore.setState({ projectFilters: ['/tmp/visible'], hostFilters: [] })
 

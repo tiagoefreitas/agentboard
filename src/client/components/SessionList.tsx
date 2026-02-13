@@ -63,6 +63,28 @@ const statusPillClass: Record<Session['status'], string> = {
   unknown: 'bg-zinc-500/20 text-zinc-400',
 }
 
+function startsWithPrefix(value: string | undefined, prefix: string): boolean {
+  return Boolean(value && value.startsWith(prefix))
+}
+
+function matchesHiddenPrefix(session: Session, prefix: string): boolean {
+  const name = session.name?.trim()
+  const agentName = session.agentSessionName?.trim()
+  const tmuxWindow = session.tmuxWindow?.trim()
+  return (
+    startsWithPrefix(agentName, prefix) ||
+    startsWithPrefix(name, prefix) ||
+    startsWithPrefix(tmuxWindow, prefix) ||
+    startsWithPrefix(session.id, prefix)
+  )
+}
+
+function matchesInactiveHiddenPrefix(session: AgentSession, prefix: string): boolean {
+  const displayName = session.displayName?.trim()
+  const sessionId = session.sessionId?.trim()
+  return startsWithPrefix(displayName, prefix) || startsWithPrefix(sessionId, prefix)
+}
+
 function useTimestampRefresh() {
   const [, setTick] = useState(0)
   useEffect(() => {
@@ -247,7 +269,7 @@ export default function SessionList({
   const filteredSessions = useMemo(() => {
     let next = sortedSessions
     if (hiddenSessionPrefix) {
-      next = next.filter((session) => !session.name.startsWith(hiddenSessionPrefix))
+      next = next.filter((session) => !matchesHiddenPrefix(session, hiddenSessionPrefix))
     }
     if (projectFilters.length > 0) {
       next = next.filter((session) => projectFilters.includes(session.projectPath))
@@ -305,7 +327,9 @@ export default function SessionList({
   const filteredInactiveSessions = useMemo(() => {
     let next = inactiveSessions
     if (hiddenSessionPrefix) {
-      next = next.filter((session) => !session.displayName.startsWith(hiddenSessionPrefix))
+      next = next.filter(
+        (session) => !matchesInactiveHiddenPrefix(session, hiddenSessionPrefix)
+      )
     }
     if (projectFilters.length > 0) {
       next = next.filter((session) => projectFilters.includes(session.projectPath))
@@ -809,6 +833,8 @@ function SessionRow({
     session.agentSessionName?.trim() ||
     session.name?.trim() ||
     session.id
+  const agentSessionName = session.agentSessionName?.trim()
+  const tmuxWindowName = session.tmuxWindow?.trim()
   const [editValue, setEditValue] = useState(displayName)
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
@@ -1013,6 +1039,30 @@ function SessionRow({
                 "{session.lastUserMessage!.length > 200
                   ? session.lastUserMessage!.slice(0, 200) + '…'
                   : session.lastUserMessage}"
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Line 3: Agent session + tmux window metadata */}
+        {(agentSessionName || tmuxWindowName) && (
+          <div className="flex flex-wrap items-center gap-1 pl-[1.375rem]">
+            {agentSessionName && (
+              <span
+                data-testid="session-agent-meta"
+                className="inline-flex max-w-full truncate rounded bg-surface px-1.5 py-0.5 text-[10px] font-mono text-muted"
+                title={agentSessionName}
+              >
+                agent:{agentSessionName}
+              </span>
+            )}
+            {tmuxWindowName && (
+              <span
+                data-testid="session-tmux-meta"
+                className="inline-flex max-w-full truncate rounded bg-surface px-1.5 py-0.5 text-[10px] font-mono text-muted"
+                title={tmuxWindowName}
+              >
+                tmux:{tmuxWindowName}
               </span>
             )}
           </div>
